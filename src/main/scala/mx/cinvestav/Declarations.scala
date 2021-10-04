@@ -1,5 +1,6 @@
 package mx.cinvestav
 
+import cats.Order
 import cats.data.{NonEmptyList, NonEmptyMap}
 import cats.effect.std.Queue
 import cats.effect.{IO, Ref}
@@ -18,23 +19,29 @@ object Declarations {
 
   case class User(id:UUID,bucketName:String)
 
+  implicit val nodeXOrder = new Order[NodeX] {
+    override def compare(x: NodeX, y: NodeX): Int = Order.compare[Int](x.port,y.port)
+  }
   case class NodeX(nodeId:String, ip:String, port:Int, metadata:Map[String,String]= Map.empty[String,String]){
     def httpUrl = s"http://$ip:$port"
   }
 
 
+//  case class SchemaMap(node:String,downloadCounter:Int)
+  case class ObjectNodeKey(objectId:String,nodeId:String)
+  case class ObjectId(value:String)
   case class NodeState(
-                          status:Status,
-                          ip:String = "127.0.0.1",
+                        status:Status,
+                        ip:String,
+//                      Available resources
+                        AR:Map[String,NodeX]  = Map.empty[String,NodeX],
+//                      OBJECT_ID -> NonEmptyList[NodeX]
+                        schema:Map[ObjectId,NonEmptyList[String]] = Map.empty[ObjectId,NonEmptyList[String]],
+//                      (ObjectId,NodeId) -> DownloadCounter
+                        downloadCounter:Map[ObjectNodeKey,Int]= Map.empty[ObjectNodeKey,Int],
 //
-                          nodesLevel0:Map[String,NodeX]  = Map.empty[String,NodeX],
-                          nodesLevel0Schema:Map[String,NonEmptyList[String]] = Map.empty[String,NonEmptyList[String]],
-                          nodesLevel1:Map[String,NodeX]  = Map.empty[String,NodeX],
-                          nodesLevel1Schema:Map[String,NonEmptyList[String]] = Map.empty[String,NonEmptyList[String]],
-  //                        NodeX -> List[Files].length
-                          lb:Option[Balancer[NodeX]]=None,
-//                        File -> List[NodeX]
-//                          schema:Map[String,NonEmptyList[String]] = Map.empty[String,NonEmptyList[String]]
+                        lb:Option[Balancer[NodeX]]=None,
+                        downloadLB:Option[Balancer[NodeX]]=None,
                         )
   case class NodeContext(
                             config: DefaultConfig,

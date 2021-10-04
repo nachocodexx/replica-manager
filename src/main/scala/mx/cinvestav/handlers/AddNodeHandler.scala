@@ -34,27 +34,27 @@ object AddNodeHandler {
         currentState <- maybeCurrentState
         timestamp    <- liftFF[Long,E](IO.realTime.map(_.toMillis))
         nodeXId      = payload.nodeId
-        level        = payload.metadata.get("level").flatMap(_.toIntOption).getOrElse(0)
+//        level        = payload.metadata.get("level").flatMap(_.toIntOption).getOrElse(0)
         newNode      = (nodeXId -> NodeX(
           nodeId= nodeXId,
           ip=payload.ip,
           port=payload.port,
           metadata = payload.metadata
         ))
-        _            <-  level match {
-          case 0 => for {
-            _ <- L.debug("ADD TO LEVEL 0")
-            _            <- liftFF[Unit,E](
-              ctx.state.update(s=>s.copy(nodesLevel0 = s.nodesLevel0 + newNode))
-            )
-          } yield ()
-          case 1 => for {
-            _ <- L.debug("ADD TO LEVEL 1")
-            _ <- liftFF[Unit,E](
-              ctx.state.update(s=>s.copy(nodesLevel1 = s.nodesLevel1 + newNode))
-            )
-          } yield ()
-        }
+        _            <- liftFF[Unit,E](
+          ctx.state.update(s=>s.copy(AR = s.AR + newNode))
+        )
+//        _            <-  level match {
+//          case 0 => for {
+//            _ <- L.debug("ADD TO LEVEL 0")
+//          } yield ()
+//          case 1 => for {
+//            _ <- L.debug("ADD TO LEVEL 1")
+//            _ <- liftFF[Unit,E](
+//              ctx.state.update(s=>s.copy(nodesLevel1 = s.nodesLevel1 + newNode))
+//            )
+//          } yield ()
+//        }
         latency      =  timestamp - payload.timestamp
         _            <- L.info(s"ADD_NODE_LATENCY $latency")
         _            <- L.debug(payload.asJson.toString)

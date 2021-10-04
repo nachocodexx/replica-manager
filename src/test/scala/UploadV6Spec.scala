@@ -18,8 +18,10 @@ import scala.concurrent.ExecutionContext.global
 import scala.concurrent.duration._
 import scala.language.postfixOps
 //import org.http4s.client.dsl.io.
+import concurrent.duration._
 
 class UploadV6Spec extends munit .CatsEffectSuite {
+  override def munitTimeout: Duration = Int.MaxValue seconds
   trait OperationType
   case object Upload extends OperationType{
     override def toString():String = "UPLOAD"
@@ -159,23 +161,21 @@ class UploadV6Spec extends munit .CatsEffectSuite {
     resourceClient.use{ client => for {
       _      <- IO.unit
       trace  = NonEmptyList.of[RequestX](
-        RequestX(Upload,500,uploadRequest(3000,pdf0Multipart,0)),
-//        RequestX(Upload,1000,uploadRequest(3000,pdf1Multipart,0)),
-//        RequestX(Upload,1000,uploadRequest(3000,video0Multipart,1)),
-//      ____________________________________________________________
-//        RequestX(Download,1000,downloadRequest(3000,pdf0Id)),
-//        RequestX(Download,1000,downloadRequest(3000,pdf0Id)),
-//        RequestX(Download,1500,downloadRequest(4000,video0Id)),
-//       ____________________________________________________________
-//        RequestX(Upload,1000,uploadRequest(4000,pdf2Multipart,0)),
-//          RequestX(Upload,2000,flushAllRequest(4000,0)),
-//        RequestX(Upload,1700,downloadRequest(4000,pdf0Id)),
-//        RequestX(Upload,1900,downloadRequest(4000,pdf1Id)),
-//        RequestX(Upload,1000,downloadRequest(4000,pdf1Id)),
-//        RequestX(Upload,1000,downloadRequest(4000,pdf1Id)),
-//        RequestX(Upload,1500,downloadRequest(4000,pdf0Id)),
-//        RequestX(Upload,1500,downloadRequest(4000,pdf0Id)),
-//        RequestX(Upload,1500,downloadRequest(4000,pdf0Id)),
+//                VIDEO 0
+//        RequestX(Upload,0,uploadRequest(3000,video0Multipart,0)),
+//          RequestX(Download,100,downloadRequest(3000,video0Id)),
+        //        PDf 0
+//        RequestX(Upload,0,uploadRequest(3000,pdf0Multipart,0)),
+        RequestX(Download,100,downloadRequest(3000,pdf0Id)),
+////      PDF 1
+//        RequestX(Upload,1500,uploadRequest(3000,pdf1Multipart,0)),
+//        RequestX(Download,1100,downloadRequest(3000,pdf1Id)),
+//
+//        RequestX(Upload,17500,uploadRequest(3000,pdf2Multipart,0)),
+//        RequestX(Download,17100,downloadRequest(3000,pdf2Id)),
+////
+//        RequestX(Upload,18500,uploadRequest(3000,pdf3Multipart,0)),
+//        RequestX(Download,18100,downloadRequest(3000,pdf3Id)),
 //      _____________________________________________________________
       )
 
@@ -183,19 +183,23 @@ class UploadV6Spec extends munit .CatsEffectSuite {
         case (reqx, index) => for {
           _            <- IO.unit
           waitingTime_ = reqx.arrivalTime - lastArrivalTime
-          _            <- IO.println(waitingTime_)
+//          _            <- IO.println(waitingTime_)
           waitingTime  = if(waitingTime_ < 0 )  0 else waitingTime_
           _            <- IO.sleep(waitingTime milliseconds)
           resultId     = UUID.randomUUID()
-          _         <- IO.println(s"${reqx.operationType.toString} - $resultId")
+          initTime  <- IO.realTime.map(_.toMillis)
           res       <- client.stream(reqx.req).flatMap{ response=>
             val body = response.body
             if(reqx.operationType == Download){
-              val sinkPath = Paths.get(SINK_FOLDER+s"/$resultId")
-              body.through(Files[IO].writeAll(sinkPath))
+              val sinkPath = Paths.get(SINK_FOLDER+s"/$resultId.pdf")
+              body.through(Files[IO].writeAll(sinkPath)) ++ fs2.Stream.eval(IO.println(response))
             }
-            else fs2.Stream.eval(IO.println(response))
+            else fs2.Stream.eval(IO.unit)
           }.compile.drain
+          endTime  <- IO.realTime.map(_.toMillis)
+          time     = endTime-initTime
+          _         <- IO.println(s"${reqx.operationType.toString} - $resultId - $time")
+//          _        <-
           _ <- IO.delay{ lastArrivalTime = waitingTime }
         } yield res
       }
