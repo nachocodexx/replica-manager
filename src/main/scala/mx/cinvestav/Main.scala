@@ -34,7 +34,7 @@ object Main extends IOApp {
 
   override def run(args: List[String]): IO[ExitCode] = {
     RabbitMQUtils.initV2[IO](rabbitMQConfig){ implicit client=>
-      client.createConnection.use { implicit connection => for {
+      client.createConnection.use { implicit connection =>for {
       implicit0(rabbitMQContext:RabbitMQContext) <- IO.pure(RabbitMQContext(client = client,connection=connection))
         exchangeName   = ExchangeName(config.poolId)
           _            <- Exchange.topic(exchangeName = exchangeName)

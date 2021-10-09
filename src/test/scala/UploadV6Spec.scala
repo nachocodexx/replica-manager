@@ -2,6 +2,7 @@ import cats.data.NonEmptyList
 import cats.effect._
 import cats.implicits._
 import fs2.io.file.Files
+import fs2.hash
 import mx.cinvestav.commons.fileX.FileMetadata
 import org.http4s._
 import org.http4s.blaze.client.BlazeClientBuilder
@@ -11,7 +12,8 @@ import org.typelevel.log4cats.SelfAwareStructuredLogger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import org.typelevel.vault.Vault
 
-import java.io.File
+import java.io.{ByteArrayOutputStream, File}
+import java.nio.ByteBuffer
 import java.nio.file.Paths
 import java.util.UUID
 import scala.concurrent.ExecutionContext.global
@@ -55,7 +57,23 @@ class UploadV6Spec extends munit .CatsEffectSuite {
   final val userId   = UUID.fromString("3acf3090-4025-4516-8fb5-fa672589b465")
   test("Mimetype"){
     val mt = MediaType.forExtension("jpg")
-    println(mt)
+    val streamBytes = Files[IO].readAll(video0.toPath,8192)
+    val buffer      = streamBytes.through{ s0=>
+      fs2.Stream.suspend{
+        s0.chunks.fold(new ByteArrayOutputStream(1000)){ (buffer,chunk)=>
+          val bytes = chunk.toArraySlice
+          buffer.write(bytes.values,bytes.offset,bytes.size)
+          buffer
+        }
+      }
+    }
+    buffer
+      .evalMap(buffer=>
+//        buffer
+        IO.println(buffer.size())
+      )
+      .compile.drain
+//    println(mt)
   }
 
   test("Workload"){
@@ -139,8 +157,24 @@ class UploadV6Spec extends munit .CatsEffectSuite {
         Headers(
           Header.Raw(CIString("User-Id"),userId.toString),
           Header.Raw(CIString("Bucket-Id"),"nacho-bucket"),
-//          Header.Raw(CIString("Operation-Id"),operationId.toString),
           Header.Raw(CIString("Storage-Level"),"0"),
+//          Header.Raw(CIString("guid"),"")
+        )
+      )
+    val replicateRequest = (port:Int,multipart:Multipart[IO]) =>Request[IO](
+      method = Method.POST,
+      uri = Uri.unsafeFromString(s"http://localhost:$port/api/v6/upload"),
+      httpVersion = HttpVersion.`HTTP/1.1`,
+      headers = multipart.headers,
+      attributes = Vault.empty
+    )
+      .withEntity(multipart)
+      .putHeaders(
+        Headers(
+          Header.Raw(CIString("User-Id"),userId.toString),
+          Header.Raw(CIString("Bucket-Id"),"nacho-bucket"),
+          multipart.parts.head.headers.get(CIString("guid")).get
+//            .get("guid").get
         )
       )
 
@@ -161,23 +195,18 @@ class UploadV6Spec extends munit .CatsEffectSuite {
     resourceClient.use{ client => for {
       _      <- IO.unit
       trace  = NonEmptyList.of[RequestX](
-//                VIDEO 0
-//        RequestX(Upload,0,uploadRequest(3000,video0Multipart,0)),
-//          RequestX(Download,100,downloadRequest(3000,video0Id)),
-        //        PDf 0
 //        RequestX(Upload,0,uploadRequest(3000,pdf0Multipart,0)),
-        RequestX(Download,100,downloadRequest(3000,pdf0Id)),
-////      PDF 1
-//        RequestX(Upload,1500,uploadRequest(3000,pdf1Multipart,0)),
-//        RequestX(Download,1100,downloadRequest(3000,pdf1Id)),
-//
-//        RequestX(Upload,17500,uploadRequest(3000,pdf2Multipart,0)),
-//        RequestX(Download,17100,downloadRequest(3000,pdf2Id)),
-////
-//        RequestX(Upload,18500,uploadRequest(3000,pdf3Multipart,0)),
-//        RequestX(Download,18100,downloadRequest(3000,pdf3Id)),
-//      _____________________________________________________________
+//        RequestX(Upload,0,uploadRequest(3000,pdf1Multipart,0)),
+          RequestX(Download,100,downloadRequest(3000,pdf1Id)),
+//        RequestX(Upload,0,replicateRequest(3000,pdf0Multipart)),
       )
+//    trace      = NonEmptyList.fromListUnsafe(List.fill(100)(RequestX(Download,100,downloadRequest(3000,pdf1Id))))
+//          RequestX(Upload,0,uploadRequest(3000,pdf0Multipart,0)),
+//        RequestX(Download,100,downloadRequest(3000,pdf1Id)),
+//          RequestX(Download,100,downloadRequest(3000,pdf1Id)),
+//          RequestX(Download,100,downloadRequest(3000,pdf1Id)),
+//        RequestX(Download,100,downloadRequest(3000,pdf0Id)),
+//          RequestX(Upload,0,replicateRequest(3000,pdf0Multipart)),
 
       responses <- trace.zipWithIndex.traverse {
         case (reqx, index) => for {
@@ -194,7 +223,7 @@ class UploadV6Spec extends munit .CatsEffectSuite {
               val sinkPath = Paths.get(SINK_FOLDER+s"/$resultId.pdf")
               body.through(Files[IO].writeAll(sinkPath)) ++ fs2.Stream.eval(IO.println(response))
             }
-            else fs2.Stream.eval(IO.unit)
+            else fs2.Stream.eval(IO.unit) ++ fs2.Stream.eval(IO.println(response))
           }.compile.drain
           endTime  <- IO.realTime.map(_.toMillis)
           time     = endTime-initTime
@@ -211,3 +240,20 @@ class UploadV6Spec extends munit .CatsEffectSuite {
 
 
 }
+//                VIDEO 0
+//        RequestX(Upload,0,uploadRequest(3000,video0Multipart,0)),
+//          RequestX(Download,100,downloadRequest(3000,video0Id)),
+//        PDf 0
+//          RequestX(Upload,0,uploadRequest(3000,pdf0Multipart,0)),
+//        RequestX(Download,100,downloadRequest(3000,pdf0Id)),
+//        RequestX(Upload,0,replicateRequest(3000,pdf0Multipart)),
+////      PDF 1
+//        RequestX(Upload,1500,uploadRequest(3000,pdf1Multipart,0)),
+//        RequestX(Download,1100,downloadRequest(3000,pdf1Id)),
+//
+//        RequestX(Upload,17500,uploadRequest(3000,pdf2Multipart,0)),
+//        RequestX(Download,17100,downloadRequest(3000,pdf2Id)),
+////
+//        RequestX(Upload,18500,uploadRequest(3000,pdf3Multipart,0)),
+//        RequestX(Download,18100,downloadRequest(3000,pdf3Id)),
+//      _____________________________________________________________

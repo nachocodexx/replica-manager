@@ -29,7 +29,9 @@ object Declarations {
 
 //  case class SchemaMap(node:String,downloadCounter:Int)
   case class ObjectNodeKey(objectId:String,nodeId:String)
-  case class ObjectId(value:String)
+  case class ObjectId(value:String){
+    def toObjectNodeKey(nodeId:String): ObjectNodeKey = ObjectNodeKey(value,nodeId)
+  }
   case class NodeState(
                         status:Status,
                         ip:String,
