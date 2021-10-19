@@ -25,6 +25,7 @@ case class DefaultConfig(
                           poolId:String,
                           host:String,
                           port:Int,
+                          maxRf:Int,
                           systemReplication:SystemReplication,
                           rabbitmq: RabbitMQClusterConfig
                         )

@@ -13,6 +13,7 @@ object Dependencies {
     lazy val CatsNIO = "io.github.akiomik" %% "cats-nio-file" % "1.6.0"
     val catsRetryVersion = "3.1.0"
     lazy val CatsRetry = "com.github.cb372" %% "cats-retry" % catsRetryVersion
+    lazy val Breeze = "org.scalanlp" %% "breeze" % "1.2"
 //
     val http4sVersion = "1.0.0-M23"
     lazy val Http4s =Seq(
@@ -21,7 +22,7 @@ object Dependencies {
       "org.http4s" %% "http4s-blaze-client",
       "org.http4s" %% "http4s-circe"
     ).map(_ % http4sVersion)
-    Seq(RabbitMQUtils,PureConfig,Commons,MUnitCats,Log4Cats,ScalaCompress,Mules,CatsNIO,CatsRetry) ++Http4s
+    Seq(RabbitMQUtils,PureConfig,Commons,MUnitCats,Log4Cats,ScalaCompress,Mules,CatsNIO,CatsRetry,Breeze) ++Http4s
   }
 }
 
