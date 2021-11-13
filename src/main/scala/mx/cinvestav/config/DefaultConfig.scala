@@ -1,6 +1,8 @@
 package mx.cinvestav.config
 
-  trait NodeInfo {
+import org.http4s.Uri
+
+trait NodeInfo {
     def protocol: String
     def ip: String
     def hostname: String
@@ -15,8 +17,13 @@ case class SystemReplication(
                               apiVersion:String="v6"
                             ) extends NodeInfo{
 
-  def url:String = s"$protocol://${ip}:$port"
+  def url:String = s"$protocol://$hostname:$port"
   def apiUrl:String = s"${this.url}/api/$apiVersion"
+  def createNodeStr:String = s"${this.apiUrl}/create/cache-node"
+  def createNodeUri:Uri = Uri.unsafeFromString(
+    s"${this.apiUrl}/create/cache-node"
+  )
+
 //  def createCacheNode
 }
 
@@ -26,6 +33,19 @@ case class DefaultConfig(
                           host:String,
                           port:Int,
                           maxRf:Int,
+                          maxAr:Int,
                           systemReplication:SystemReplication,
-                          rabbitmq: RabbitMQClusterConfig
+                          serviceReplicationDaemon:Boolean,
+                          serviceReplicationThreshold:Double,
+                          serviceReplicationDaemonDelay:Long,
+                          replicationDaemon:Boolean,
+                          replicationDaemonDelayMillis:Long,
+                          balanceTemperature:Boolean,
+                          uploadLoadBalancer:String="UF",
+                          downloadLoadBalancer:String="LEAST_DOWNLOADS",
+                          defaultCacheSize:Int,
+                          defaultCachePolicy:String,
+                          defaultCachePort:Int,
+                          hostLogPath:String
+                          //                          rabbitmq: RabbitMQClusterConfig
                         )

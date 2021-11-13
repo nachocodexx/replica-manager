@@ -53,7 +53,24 @@ class UploadV6Spec extends munit .CatsEffectSuite {
   final val pdf3Id   = UUID.fromString("9d60dae7-7527-4bc2-a180-22a2a1740ac7")
   final val pdf4File = new File(s"$SOURCE_FOLDER/4.pdf")
   final val pdf4Id   = UUID.fromString("db1de349-c836-4dd5-a874-39a3477cb441")
-  final val video0 = new File(s"$SOURCE_FOLDER/6.mkv")
+  final val pdf5File = new File(s"$SOURCE_FOLDER/00.pdf")
+  final val pdf5Id   = UUID.fromString("506cb8b4-cedc-47a9-b319-34c9c82072a6")
+
+  final val pdf6File = new File(s"$SOURCE_FOLDER/6.pdf")
+  final val pdf6Id   = UUID.fromString("1bf34600-c155-44d7-8d52-799e83946b0d")
+  final val pdf7File = new File(s"$SOURCE_FOLDER/7.pdf")
+  final val pdf7Id   = UUID.fromString("048a4575-7893-4ed5-bd72-c56414aab3f2")
+  final val pdf8File = new File(s"$SOURCE_FOLDER/8.pdf")
+  final val pdf8Id   = UUID.fromString("af0a2cc9-208a-415e-8ef1-9d9141fcd295")
+
+  final val pdf9File = new File(s"$SOURCE_FOLDER/9.pdf")
+  final val pdf9Id   = UUID.fromString("e58d963b-6cc5-4f1a-8335-45d19561d494")
+//
+  final val mediumBookFile = new File(s"$SOURCE_FOLDER/medium_book.pdf")
+  final val mediumBookId   = UUID.fromString("5e69b1c8-fdb4-469a-bfa2-aa7722ede4ce")
+//
+//  final val video0 = new File(s"$SOURCE_FOLDER/6.mkv")
+  final val video0 = new File(s"$SOURCE_FOLDER/medium_video.mp4")
   final val video0Id   = UUID.fromString("c5d9d60b-ebde-4ae0-be32-40f5513af0a2")
 //
   final val userId   = UUID.fromString("3acf3090-4025-4516-8fb5-fa672589b465")
@@ -141,14 +158,65 @@ class UploadV6Spec extends munit .CatsEffectSuite {
         )
       ),
 
+      Part.fileData("pdf5",pdf5File,
+        headers = Headers(
+          Header.Raw(CIString("Object-Id"),pdf5Id.toString),
+          Header.Raw(CIString("filename"), FileMetadata.fromPath(pdf5File.toPath).fullname ),
+          headers.`Content-Type`(MediaType.application.pdf),
+          headers.`Content-Length`(pdf5File.length())
+        )
+      ),
+
+      Part.fileData("pdf6",pdf6File,
+        headers = Headers(
+          Header.Raw(CIString("Object-Id"),pdf6Id.toString),
+          Header.Raw(CIString("filename"), FileMetadata.fromPath(pdf6File.toPath).fullname ),
+          headers.`Content-Type`(MediaType.application.pdf),
+          headers.`Content-Length`(pdf6File.length())
+        )
+      ),
+      Part.fileData("pdf7",pdf7File,
+        headers = Headers(
+          Header.Raw(CIString("Object-Id"),pdf7Id.toString),
+          Header.Raw(CIString("filename"), FileMetadata.fromPath(pdf7File.toPath).fullname ),
+          headers.`Content-Type`(MediaType.application.pdf),
+          headers.`Content-Length`(pdf7File.length())
+        )
+      ),
+      Part.fileData("pdf8",pdf8File,
+        headers = Headers(
+          Header.Raw(CIString("Object-Id"),pdf8Id.toString),
+          Header.Raw(CIString("filename"), FileMetadata.fromPath(pdf8File.toPath).fullname ),
+          headers.`Content-Type`(MediaType.application.pdf),
+          headers.`Content-Length`(pdf8File.length())
+        )
+      ),
+      Part.fileData("pdf9",pdf9File,
+        headers = Headers(
+          Header.Raw(CIString("Object-Id"),pdf9Id.toString),
+          Header.Raw(CIString("filename"), FileMetadata.fromPath(pdf9File.toPath).fullname ),
+          headers.`Content-Type`(MediaType.application.pdf),
+          headers.`Content-Length`(pdf9File.length())
+        )
+      ),
+//
       Part.fileData("video0",video0,
           headers = Headers(
             Header.Raw(CIString("Object-Id"),video0Id.toString),
             Header.Raw(CIString("filename"), FileMetadata.fromPath(video0.toPath).fullname ),
-            headers.`Content-Type`(MediaType.video.mpv),
+            headers.`Content-Type`(MediaType.video.mp4),
             headers.`Content-Length`(video0.length())
           )
-    )
+    ),
+      Part.fileData("pdf9",mediumBookFile,
+        headers = Headers(
+          Header.Raw(CIString("Object-Id"),mediumBookId.toString),
+          Header.Raw(CIString("filename"), FileMetadata.fromPath(mediumBookFile.toPath).fullname ),
+          headers.`Content-Type`(MediaType.application.pdf),
+          headers.`Content-Length`(mediumBookFile.length())
+        )
+      ),
+
     )
     val multipartOneFile = (part:Part[IO]) => Multipart[IO](
       parts =  Vector(part),
@@ -160,7 +228,13 @@ class UploadV6Spec extends munit .CatsEffectSuite {
     val pdf2Multipart = multipartOneFile(parts(2))
     val pdf3Multipart = multipartOneFile(parts(3))
     val pdf4Multipart = multipartOneFile(parts(4))
-    val video0Multipart = multipartOneFile(parts(5))
+    val pdf5Multipart = multipartOneFile(parts(5))
+    val pdf6Multipart = multipartOneFile(parts(6))
+    val pdf7Multipart = multipartOneFile(parts(7))
+    val pdf8Multipart = multipartOneFile(parts(8))
+    val pdf9Multipart = multipartOneFile(parts(9))
+    val video0Multipart = multipartOneFile(parts(10))
+    val mediumBookMultipart = multipartOneFile(parts(11))
 
     val uploadRequest = (port:Int,multipart:Multipart[IO]) =>Request[IO](
       method = Method.POST,
@@ -192,7 +266,6 @@ class UploadV6Spec extends munit .CatsEffectSuite {
           Header.Raw(CIString("User-Id"),userId.toString),
           Header.Raw(CIString("Bucket-Id"),"nacho-bucket"),
           multipart.parts.head.headers.get(CIString("guid")).get
-//            .get("guid").get
         )
       )
 
@@ -214,87 +287,38 @@ class UploadV6Spec extends munit .CatsEffectSuite {
       _      <- IO.unit
 //
       trace  = List(
-        RequestX(Upload,0,uploadRequest(3000,pdf0Multipart)),
-        RequestX(Download,3200,downloadRequest(3000,pdf0Id,pdf0File.length())),
-        RequestX(Download,3200,downloadRequest(3000,pdf0Id,pdf0File.length())),
-        RequestX(Download,3200,downloadRequest(3000,pdf0Id,pdf0File.length())),
-        RequestX(Download,3200,downloadRequest(3000,pdf0Id,pdf0File.length())),
-        RequestX(Download,3200,downloadRequest(3000,pdf0Id,pdf0File.length())),
-//
-        RequestX(Upload,3000,uploadRequest(3000,pdf1Multipart)),
-        RequestX(Download,3500,downloadRequest(3000,pdf1Id,pdf1File.length())),
-        RequestX(Download,3500,downloadRequest(3000,pdf1Id,pdf1File.length())),
-        RequestX(Download,3500,downloadRequest(3000,pdf1Id,pdf1File.length())),
-        RequestX(Download,3500,downloadRequest(3000,pdf1Id,pdf1File.length())),
-        RequestX(Download,3500,downloadRequest(3000,pdf1Id,pdf1File.length())),
-        RequestX(Download,3500,downloadRequest(3000,pdf1Id,pdf1File.length())),
-        RequestX(Download,3500,downloadRequest(3000,pdf1Id,pdf1File.length())),
-        RequestX(Download,3500,downloadRequest(3000,pdf1Id,pdf1File.length())),
-        RequestX(Download,3500,downloadRequest(3000,pdf1Id,pdf1File.length())),
-        RequestX(Download,5000,downloadRequest(3000,pdf1Id,pdf1File.length())),
-//
-        RequestX(Upload,5000,uploadRequest(3000,pdf2Multipart)),
-        RequestX(Download,5200,downloadRequest(3000,pdf2Id,pdf2File.length())),
-        RequestX(Download,5200,downloadRequest(3000,pdf2Id,pdf2File.length())),
-        RequestX(Download,5200,downloadRequest(3000,pdf2Id,pdf2File.length())),
-        RequestX(Download,5200,downloadRequest(3000,pdf2Id,pdf2File.length())),
-        RequestX(Download,5200,downloadRequest(3000,pdf2Id,pdf2File.length())),
-        RequestX(Download,5200,downloadRequest(3000,pdf2Id,pdf2File.length())),
-        RequestX(Download,5200,downloadRequest(3000,pdf2Id,pdf2File.length())),
-        RequestX(Download,5200,downloadRequest(3000,pdf2Id,pdf2File.length())),
-        RequestX(Download,5200,downloadRequest(3000,pdf2Id,pdf2File.length())),
-        RequestX(Download,5200,downloadRequest(3000,pdf2Id,pdf2File.length())),
-        RequestX(Download,5200,downloadRequest(3000,pdf2Id,pdf2File.length())),
-        RequestX(Download,5200,downloadRequest(3000,pdf2Id,pdf2File.length())),
-        RequestX(Download,5200,downloadRequest(3000,pdf2Id,pdf2File.length())),
-        RequestX(Download,5500,downloadRequest(3000,pdf2Id,pdf2File.length())),
-        RequestX(Download,5500,downloadRequest(3000,pdf2Id,pdf2File.length())),
-        RequestX(Download,5500,downloadRequest(3000,pdf2Id,pdf2File.length())),
-        RequestX(Download,5500,downloadRequest(3000,pdf2Id,pdf2File.length())),
-        RequestX(Download,5500,downloadRequest(3000,pdf2Id,pdf2File.length())),
-        RequestX(Download,5500,downloadRequest(3000,pdf2Id,pdf2File.length())),
-        RequestX(Download,5500,downloadRequest(3000,pdf2Id,pdf2File.length())),
-//
-        RequestX(Upload,5000,uploadRequest(3000,pdf3Multipart)),
-        RequestX(Download,5000,downloadRequest(3000,pdf3Id,pdf3File.length())),
-        RequestX(Download,5000,downloadRequest(3000,pdf3Id,pdf3File.length())),
-        RequestX(Download,5000,downloadRequest(3000,pdf3Id,pdf3File.length())),
-        RequestX(Download,5000,downloadRequest(3000,pdf3Id,pdf3File.length())),
-        RequestX(Download,5000,downloadRequest(3000,pdf3Id,pdf3File.length())),
-//
-        RequestX(Upload,5000,uploadRequest(3000,pdf4Multipart)),
-        RequestX(Download,5000,downloadRequest(3000,pdf4Id,pdf4File.length())),
-        RequestX(Download,5000,downloadRequest(3000,pdf4Id,pdf4File.length())),
-        RequestX(Download,5000,downloadRequest(3000,pdf4Id,pdf4File.length())),
-        RequestX(Download,5000,downloadRequest(3000,pdf4Id,pdf4File.length())),
-        RequestX(Download,5000,downloadRequest(3000,pdf4Id,pdf4File.length())),
-      )
-
-
-//      ++ List.fill(50)(RequestX(Download,5000,downloadRequest(3000,pdf0Id,pdf0File.length()))) ++
-//        List.fill(1)(RequestX(Download,5000,downloadRequest(3000,pdf1Id,pdf0File.length())))
-      //        List.fill(100)(RequestX(Download,1000,downloadRequest(3000,pdf0Id,pdf0File.length()))) ++
-//          List.fill(100)(RequestX(Download,1000,downloadRequest(3000,pdf1Id,pdf1File.length())))
-           //        NonEmptyList.of[RequestX](
+//        ________________________________________________________
 //        RequestX(Upload,0,uploadRequest(3000,pdf0Multipart)),
-//        RequestX(Download,100,downloadRequest(3000,pdf0Id,pdf0File.length())),
-//        RequestX(Upload,500,uploadRequest(3000,pdf1Multipart)),
-//        RequestX(Download,1000,downloadRequest(3000,pdf1Id,pdf1File.length())),
-//        RequestX(Download,1000,downloadRequest(3000,pdf1Id,pdf1File.length())),
-//        RequestX(Download,1000,downloadRequest(3000,pdf1Id,pdf1File.length())),
-//      )
-//      )
+        RequestX(Upload,0,uploadRequest(3000,pdf1Multipart)),
+//        RequestX(Download,3200,downloadRequest(3000,pdf0Id,pdf0File.length())),
+//            RequestX(Download,3200,downloadRequest(3000,pdf1Id,pdf1File.length())),
+//          RequestX(Upload,3400,uploadRequest(3000,pdf2Multipart)),
+
+//        RequestX(Download,3200,downloadRequest(3000,pdf5Id,pdf5File.length())),
+//        RequestX(Upload,0,uploadRequest(3000,pdf1Multipart)),
+//        RequestX(Download,4200,downloadRequest(3000,pdf2Id,pdf2File.length())),
+//          RequestX(Upload,0,uploadRequest(3000,pdf2Multipart)),
+//        RequestX(Upload,0,uploadRequest(3000,pdf3Multipart)),
+//        RequestX(Upload,0,uploadRequest(3000,pdf4Multipart)),
+//        RequestX(Upload,0,uploadRequest(3000,pdf5Multipart)),
+//        RequestX(Upload,0,uploadRequest(3000,pdf6Multipart)),
+//        RequestX(Upload,0,uploadRequest(3000,pdf7Multipart)),
+//        RequestX(Upload,0,uploadRequest(3000,pdf8Multipart)),
+//        RequestX(Upload,0,uploadRequest(3000,pdf9Multipart)),
+//       RequestX(Download,4200,downloadRequest(3000,pdf2Id,pdf2File.length())),
+//          RequestX(Download,5700,downloadRequest(3000,pdf5Id,pdf5File.length())),
+//          RequestX(Download,5700,downloadRequest(3000,pdf5Id,pdf5File.length())),
+      )
 
       responses <- trace.zipWithIndex.traverse {
         case (reqx, index) => for {
           _            <- IO.unit
           waitingTime_ = reqx.arrivalTime - lastArrivalTime
-//          _            <- IO.println(waitingTime_)
           waitingTime  = if(waitingTime_ < 0 )  0 else waitingTime_
           _            <- IO.sleep(waitingTime milliseconds)
           resultId     = UUID.randomUUID()
-          initTime  <- IO.realTime.map(_.toMillis)
-          res       <- client.stream(reqx.req).flatMap{ response=>
+          initTime     <- IO.realTime.map(_.toMillis)
+          res          <- client.stream(reqx.req).flatMap{ response=>
             val body = response.body
             if(reqx.operationType == Download){
               val sinkPath = Paths.get(SINK_FOLDER+s"/$resultId.pdf")

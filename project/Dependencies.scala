@@ -14,6 +14,8 @@ object Dependencies {
     val catsRetryVersion = "3.1.0"
     lazy val CatsRetry = "com.github.cb372" %% "cats-retry" % catsRetryVersion
     lazy val Breeze = "org.scalanlp" %% "breeze" % "1.2"
+//    val catsRetryVersion = "3.1.0"
+//    lazy val CatsRetry = "com.github.cb372" %% "cats-retry" % catsRetryVersion,
 //
     val http4sVersion = "1.0.0-M23"
     lazy val Http4s =Seq(

@@ -1,24 +1,104 @@
 import breeze.linalg._
 import breeze.numerics._
-import mx.cinvestav.commons.events.SetDownloads
+import mx.cinvestav.commons.events.{Push, Replicated}
+import mx.cinvestav.events.Events.GetInProgress
+
+import scala.concurrent.duration.Duration
 //import breeze.linalg.di
-import breeze.stats.mean
+import breeze.stats.{mean,stddev}
 import mx.cinvestav.commons.events.{Missed, Put}
 
 import java.util.UUID
 //{DenseMatrix, DenseVector, sum}
 import cats.implicits._
 import cats.effect._
-import mx.cinvestav.Declarations.eventXEncoder
 import mx.cinvestav.commons.events
-import mx.cinvestav.commons.events.{Get,AddedNode, Del, Downloaded, EventX, EventXOps, Evicted, RemovedNode, Uploaded,Pull=>PullEvent}
+import mx.cinvestav.Declarations.Implicits._
+import mx.cinvestav.commons.events.{Get,AddedNode, Del, Downloaded, EventX, EventXOps, Evicted, RemovedNode, Uploaded,Pull=>PullEvent,TransferredTemperature => SetDownloads}
 import mx.cinvestav.commons.types.NodeX
 import mx.cinvestav.events.Events
 //
 import io.circe._
 import io.circe.generic.auto._
 import io.circe.syntax._
+import concurrent.duration._
+import language.postfixOps
 class EventSpect extends munit .CatsEffectSuite {
+
+  override def munitTimeout: Duration = Int.MaxValue seconds
+
+  val baseEvicted = Evicted(
+    eventId = UUID.randomUUID().toString,
+    serialNumber = 0,
+    nodeId = "cache-0",
+    objectId = "F0",
+    objectSize = 1000,
+    timestamp = 0L,
+    serviceTimeNanos = 0L,
+    fromNodeId = ""
+  )
+  val baseMissed = Missed(
+    eventId = UUID.randomUUID().toString,
+    serialNumber = 0,
+    nodeId = "cache-0",
+    objectId = "F0",
+    objectSize = 1000,
+    timestamp = 0L,
+    serviceTimeNanos = 0L
+  )
+  val basedUploaded = Put(
+    objectId = "F0",
+    objectSize = 100,
+    nodeId = "cache-0",
+    timestamp = 0L,
+    serviceTimeNanos = 0L,
+    serialNumber = 0
+  )
+
+  val baseDownloadedInProgress = GetInProgress(
+    eventId = "event-",
+    serialNumber = 0,
+    objectId = "F0",
+    objectSize = 100,
+    nodeId = "cache-0",
+    timestamp = 0L,
+    monotonicTimestamp = 0L,
+    serviceTimeNanos = 0L,
+    correlationId = ""
+  )
+  val baseDownloaded = Get(
+    eventId = "event-",
+    serialNumber = 0,
+    objectId = "F0",
+    objectSize = 100,
+    //        nodeId="lb-0",
+    nodeId = "cache-0",
+    timestamp = 0L,
+    serviceTimeNanos = 0L
+  )
+  val baseAddedNode = AddedNode(
+    eventId = "",
+    serialNumber = 0,
+    addedNodeId = "cache-0",
+    ipAddress = "10.0.0.2",
+    nodeId="lb-0",
+    port=4000,
+    totalStorageCapacity = 1000,
+    cacheSize = 10,
+    cachePolicy = "LRU",
+    timestamp = 0L,
+    serviceTimeNanos = 0L
+  )
+  val baseSetDownloads = SetDownloads(
+    eventId = "",
+    serialNumber = 0,
+    nodeId = "cache-0",
+    objectId = "F1",
+    counter = 0,
+    timestamp = 0,
+    //      eventType = ???,
+    serviceTimeNanos = 0
+  )
 
   def preProcessingEvents(events:List[EventX],initTimestamp:Long):List[EventX]= events.zipWithIndex.map{
     case (e, i) => e match {
@@ -35,62 +115,62 @@ class EventSpect extends munit .CatsEffectSuite {
       case put:SetDownloads=> put.copy(eventId = s"event-$i",serialNumber = i,timestamp =initTimestamp+i )
     }
   }
+//  P(FAi) =
+  test("String hash"){
+    val cache0Id = "cache-0"
+    val cache1Id = "cache-1"
+    println(cache0Id.hashCode,cache1Id.hashCode)
+  }
 
+  test("Monotonic"){
+    val rawEvents2:List[EventX] = List(
+      baseAddedNode.copy(timestamp = 0,serviceTimeNanos = 1),
+      baseAddedNode.copy(addedNodeId = "cache-1",timestamp = 1,serviceTimeNanos = 1),
+      basedUploaded.copy(timestamp = 1),
+      basedUploaded.copy(nodeId = "cache-1",timestamp = 2,serviceTimeNanos = 1),
+//      baseEvicted.copy(nodeId = "cache-0",timestamp = 3),
+      basedUploaded.copy(timestamp = 4,objectId = "F2",serviceTimeNanos = 1),
+      baseDownloaded.copy(timestamp = 10,serviceTimeNanos = 1),
+    ) ++ List.fill(1000000){
+      baseDownloaded.copy(timestamp = 10,serviceTimeNanos = 500)
+    }
+    for {
+      _                <- IO.println("HEREEEEEE")
+      lastSerialNumber = 0
+      newEvents        <- Events.sequentialMonotonic(lastSerialNumber,events = rawEvents2)
+      _                <- IO.println("END_SEQUENTIAL")
+      orderedEvents    = Events.orderAndFilterEventsMonotonicV2(events = newEvents)
+//      orderedEvents    = Events.orderAndFilterEventsMonotonicV2(events = newEvents)
+      _                <- IO.println("END_ORDER")
+      x                = Events.avgServiceTime(events = orderedEvents)
+      startAt          = orderedEvents.head.monotonicTimestamp
+      endAt            = startAt+1000000000
+      y                = Events.avgArrivalRate(events = orderedEvents,startAt = startAt,endAt = endAt)
+      print            = (x:Any)=>IO.println(x.toString)
+      _                <- print(y)
+      _                <- print(x)
+//      currentObjectSize = 100000000
+
+//      x                 = Events.calculateMemoryUFByNode(events = orderedEvents,objectSize = currentObjectSize)
+//      _                 <- IO.println(orderedEvents.asJson)
+    } yield ()
+  }
   test("Demo events"){
     val initTimestamp = 1633963638000L
-    val baseMissed = Missed(
-      eventId = UUID.randomUUID().toString,
-      serialNumber = 0,
-      nodeId = "cache-0",
-      objectId = "F0",
-      objectSize = 1000,
-      timestamp = 0L,
-      milliSeconds = 0L
-    )
-    val basedUploaded = Uploaded(
-        eventId = "",
-        serialNumber = 0,
-        nodeId = "lb-0",
-        objectId = "F0",
-        objectSize = 100,
-        selectedNodeId = "cache-0",
-        timestamp = 0L,
-        milliSeconds = 0L
-      )
-    val baseDownloaded = Downloaded(
-        eventId = "event-",
-        serialNumber = 0,
-        objectId = "F0",
-        objectSize = 100,
-        nodeId="lb-0",
-        selectedNodeId = "cache-0",
-        timestamp = 0L,
-        milliSeconds = 0L
-      )
-    val baseAddedNode = AddedNode(
-        eventId = "",
-        serialNumber = 0,
-        addedNodeId = "cache-0",
-        ipAddress = "10.0.0.2",
-        nodeId="lb-0",
-        port=4000,
-        totalStorageCapacity = 1000,
-        cacheSize = 10,
-        cachePolicy = "LRU",
-        timestamp = 0L,
-        milliSeconds = 0L
-      )
-    val baseSetDownloads = SetDownloads(
-      eventId = "",
-      serialNumber = 0,
-      nodeId = "cache-0",
-      objectId = "F1",
-      counter = 0,
-      timestamp = 0,
-//      eventType = ???,
-      milliSeconds = 0
-    )
+
+
 //
+    val rawEvents2 = List(
+      baseAddedNode.copy(timestamp = 0),
+      baseAddedNode.copy(addedNodeId = "cache-1",timestamp = 1),
+      basedUploaded.copy(timestamp = 1),
+      basedUploaded.copy(nodeId = "cache-1",timestamp = 2),
+      baseEvicted.copy(nodeId = "cache-0",timestamp = 3)
+    )
+    val x = Events.orderAndFilterEventsMonotonic(events =rawEvents2)
+    println(x)
+
+
     val rawEvents = List(
 //    cache-0 ADDED
       baseAddedNode,
@@ -110,41 +190,48 @@ class EventSpect extends munit .CatsEffectSuite {
       baseDownloaded.copy(objectId = "F3"),
 //    ______________________________________
 //    F1 UPLOADED to cache-1
-      basedUploaded.copy(selectedNodeId = "cache-1",objectId = "F1"),
+      basedUploaded.copy(nodeId = "cache-1",objectId = "F1"),
 //    (F1 DOWNLOADED from cache-1) x 10
-      baseDownloaded.copy(selectedNodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(selectedNodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(selectedNodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(selectedNodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(selectedNodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(selectedNodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(selectedNodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(selectedNodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(selectedNodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(selectedNodeId = "cache-1",objectId = "F1"),
-//      basedUploaded.copy(selectedNodeId = "cache-2",objectId = "F1"),
-      baseDownloaded.copy(selectedNodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(selectedNodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(selectedNodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(selectedNodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(selectedNodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(selectedNodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(selectedNodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(selectedNodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(selectedNodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(selectedNodeId = "cache-1",objectId = "F1"),
+      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
+      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
+      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
+      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
+      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
+      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
+      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
+      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
+      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
+      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
+//      basedUploaded.copy(nodeId = "cache-2",objectId = "F1"),
+      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
+      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
+      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
+      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
+      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
+      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
+      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
+      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
+      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
+      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
 //
       baseSetDownloads.copy(nodeId = "cache-1",objectId = "F1",counter = 10),
-      baseDownloaded.copy(selectedNodeId = "cache-1",objectId = "F1"),
+      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
+
+      basedUploaded.copy(nodeId = "cache-1",objectId = "F5"),
+      baseDownloaded.copy(nodeId = "cache-1",objectId = "F5"),
+//   Cache-2
+      basedUploaded.copy(nodeId = "cache-2",objectId = "F4"),
+      baseDownloaded.copy(nodeId = "cache-2",objectId = "F4"),
 //
       baseSetDownloads.copy(nodeId = "cache-2",objectId = "F1",counter = 10),
-      baseDownloaded.copy(selectedNodeId = "cache-2",objectId = "F1"),
+      baseDownloaded.copy(nodeId = "cache-2",objectId = "F1"),
+      baseSetDownloads.copy(nodeId = "cache-2",objectId = "F1",counter = 20),
 //    ______________________________________
-      basedUploaded.copy(selectedNodeId = "cache-2",objectId = "F2"),
-      baseDownloaded.copy(selectedNodeId = "cache-2",objectId = "F2"),
-      baseDownloaded.copy(selectedNodeId = "cache-2",objectId = "F2"),
-      //      basedUploaded.copy(selectedNodeId = "cache-0",objectId = "F2"),
-      //      baseDownloaded.copy(selectedNodeId = "cache-0",objectId = "F2"),
+      basedUploaded.copy(nodeId = "cache-2",objectId = "F2"),
+      baseDownloaded.copy(nodeId = "cache-2",objectId = "F2"),
+      baseDownloaded.copy(nodeId = "cache-2",objectId = "F2"),
+      //      basedUploaded.copy(nodeId = "cache-0",objectId = "F2"),
+      //      baseDownloaded.copy(nodeId = "cache-0",objectId = "F2"),
 //      baseMissed,
 //      baseMissed,
 //      baseMissed,
@@ -154,23 +241,42 @@ class EventSpect extends munit .CatsEffectSuite {
 //      baseMissed.copy(nodeId = "cache-1"),
 
     )
+    val _rawEvents:List[EventX] = EventXOps.OrderOps.byTimestamp(List(
+      basedUploaded,
+      baseEvicted.copy(fromNodeId = "cache-0",timestamp = 1)
+    )).reverse
     val events = Events.filterEvents(
       preProcessingEvents(events = rawEvents,initTimestamp = initTimestamp)
     )
+//    println(_rawEvents.asJson)
 //    val x = Events.getHitCounterByNodeV2(events = events)
 //    println(x.asJson)
     val orderedObjectIds = Events.getObjectIds(events=events).sorted
     val orderedNodeIds = Events.getNodeIds(events=events)
     val tempMatrix = Events.generateTemperatureMatrixV2(events=events)
-//    val i = tempMatrix.linearIndex(0,1)
-    val x= argmax(tempMatrix(*,::)).toArray.toList.zip(orderedNodeIds.zipWithIndex.map(_._2))
-    println(x)
-//      .toDenseVector
-    println(orderedObjectIds)
-    println(orderedNodeIds)
-//    println(i)
-    println(tempMatrix)
-//    println(x,i)
+    val A          = Events.generateMatrixV2(events = events)
+//    First approach
+//    println(A.toString)
+    val tempVec       = mean(tempMatrix(::,*)).t
+    val totalTempMean = mean(tempVec)
+    val totalTempStd  = stddev(tempVec)
+
+//    _______________
+    val f0ObjectSize = Events.getObjectSize(objectId = "F0",events = events)
+    val users= Events.getUserIds(events = events)
+//    println(f0ObjectSize)
+//    println(s"TOTAL_MEAN $totalTempMean")
+//    println(s"TOTAL_STDDEV $totalTempStd")
+//
+//    println(orderedObjectIds)
+//    println(orderedNodeIds)
+//    println(tempVec)
+//    println(tempMatrix)
+    //    println(x)
+    //    val i = tempMatrix.linearIndex(0,1)
+    //    val x = argmax(tempMatrix(*,::)).toArray.toList.zip(orderedNodeIds.zipWithIndex.map(_._2))
+    //    println(x)
+    //      .toDenseVector
 //    println(tempMatrix.asJson)
 //    val x = Events.generateMatrix(events=events)
 //    val dividend = sum(x(*,::))
@@ -212,7 +318,7 @@ class EventSpect extends munit .CatsEffectSuite {
 //        objectId = "F0",
 //        objectSize = 100,
 //        nodeId="lb-0",
-//        selectedNodeId = "cache-0",
+//        nodeId = "cache-0",
 //        timestamp = 1633963680000L,
 //        mil
 //      )
@@ -245,7 +351,7 @@ class EventSpect extends munit .CatsEffectSuite {
 //        nodeId = "lb-0",
 //        objectId = "F0",
 //        objectSize = 100,
-//        selectedNodeId = "cache-0",
+//        nodeId = "cache-0",
 //        timestamp = 1633963638000L,
 //      ),
 //      AddedNode(
@@ -288,7 +394,7 @@ class EventSpect extends munit .CatsEffectSuite {
 //        nodeId = "lb-0",
 //        objectId = "FX",
 //        objectSize = 100,
-//        selectedNodeId = "cache-0",
+//        nodeId = "cache-0",
 //        timestamp = 1633963680000L
 //      ),
 //      Downloaded(
@@ -297,7 +403,7 @@ class EventSpect extends munit .CatsEffectSuite {
 //        objectId = "FX",
 //        objectSize = 100,
 //        nodeId="lb-0",
-//        selectedNodeId = "cache-0",
+//        nodeId = "cache-0",
 //        timestamp = 1633963680000L
 //      ),
 //      Uploaded(
@@ -306,7 +412,7 @@ class EventSpect extends munit .CatsEffectSuite {
 //        nodeId = "lb-0",
 //        objectId = "F0",
 //        objectSize = 100,
-//        selectedNodeId = "cache-0",
+//        nodeId = "cache-0",
 //        timestamp = 1633963680000L
 //      ),
 //      Evicted(
@@ -324,7 +430,7 @@ class EventSpect extends munit .CatsEffectSuite {
 //        nodeId = "lb-0",
 //        objectId = "F1",
 //        objectSize = 100,
-//        selectedNodeId = "cache-1",
+//        nodeId = "cache-1",
 //        timestamp = 1633963680000L
 //      ),
 //      Uploaded(
@@ -333,7 +439,7 @@ class EventSpect extends munit .CatsEffectSuite {
 //        nodeId = "lb-0",
 //        objectId = "F2",
 //        objectSize = 100,
-//        selectedNodeId = "cache-1",
+//        nodeId = "cache-1",
 //        timestamp = 1633963680000L
 //      )
 //    ) ++ tenDownloadsForF0 ++ List(
@@ -343,7 +449,7 @@ class EventSpect extends munit .CatsEffectSuite {
 //        nodeId = "lb-0",
 //        objectId = "F2",
 //        objectSize = 100,
-//        selectedNodeId = "cache-0",
+//        nodeId = "cache-0",
 //        timestamp = 1633963680000L
 //      ),
 //      Downloaded(
@@ -352,7 +458,7 @@ class EventSpect extends munit .CatsEffectSuite {
 //        objectId = "F2",
 //        objectSize = 100,
 //        nodeId="lb-0",
-//        selectedNodeId = "cache-1",
+//        nodeId = "cache-1",
 //        timestamp = 1633963680000L
 //      ),
 //      Downloaded(
@@ -361,7 +467,7 @@ class EventSpect extends munit .CatsEffectSuite {
 //        objectId = "F2",
 //        objectSize = 100,
 //        nodeId="lb-0",
-//        selectedNodeId = "cache-1",
+//        nodeId = "cache-1",
 //        timestamp = 1633963680000L
 //      ),
 //      Downloaded(
@@ -370,7 +476,7 @@ class EventSpect extends munit .CatsEffectSuite {
 //        objectId = "F2",
 //        objectSize = 100,
 //        nodeId="lb-0",
-//        selectedNodeId = "cache-0",
+//        nodeId = "cache-0",
 //        timestamp = 1633963680000L
 //      ),
 //      Downloaded(
@@ -379,7 +485,7 @@ class EventSpect extends munit .CatsEffectSuite {
 //        objectId = "F2",
 //        objectSize = 100,
 //        nodeId="lb-0",
-//        selectedNodeId = "cache-0",
+//        nodeId = "cache-0",
 //        timestamp = 1633963680000L
 //      ),
 //      Downloaded(
@@ -388,7 +494,7 @@ class EventSpect extends munit .CatsEffectSuite {
 //        objectId = "F2",
 //        objectSize = 100,
 //        nodeId="lb-0",
-//        selectedNodeId = "cache-0",
+//        nodeId = "cache-0",
 //        timestamp = 1633963680000L
 //      ),
 //      Uploaded(
@@ -397,7 +503,7 @@ class EventSpect extends munit .CatsEffectSuite {
 //        nodeId = "lb-0",
 //        objectId = "F3",
 //        objectSize = 100,
-//        selectedNodeId = "cache-1",
+//        nodeId = "cache-1",
 //        timestamp = 1633963680000L
 //      ),
 //      Uploaded(
@@ -406,7 +512,7 @@ class EventSpect extends munit .CatsEffectSuite {
 //        nodeId = "lb-0",
 //        objectId = "F4",
 //        objectSize = 100,
-//        selectedNodeId = "cache-1",
+//        nodeId = "cache-1",
 //        timestamp = 1633963680000L
 //      ),
 //      Uploaded(
@@ -415,7 +521,7 @@ class EventSpect extends munit .CatsEffectSuite {
 //        nodeId = "lb-0",
 //        objectId = "F5",
 //        objectSize = 100,
-//        selectedNodeId = "cache-2",
+//        nodeId = "cache-2",
 //        timestamp = 1633963680000L
 //      ),
 //      Downloaded(
@@ -424,7 +530,7 @@ class EventSpect extends munit .CatsEffectSuite {
 //        objectId = "F5",
 //        objectSize = 100,
 //        nodeId="lb-0",
-//        selectedNodeId = "cache-2",
+//        nodeId = "cache-2",
 //        timestamp = 1633963680000L
 //      ),
 //    ))
@@ -454,7 +560,7 @@ class EventSpect extends munit .CatsEffectSuite {
 ////    val downloadObjectInitCounter = objectsIds.map(x=> (x -> 0)).toMap
 ////    println(downloadObjectInitCounter)
 ////    val dowloadCounter       = Events.onlyDownloaded(events = events).map(_.asInstanceOf[Downloaded]).map{ e=>
-////      Map(e.selectedNodeId -> Map(e.objectId -> 1)  )
+////      Map(e.nodeId -> Map(e.objectId -> 1)  )
 ////    }.foldLeft(Map.empty[String,Map[String,Int]  ])(_ |+| _)
 ////      .map{
 ////        case (str, value) => (str,downloadObjectInitCounter|+|value)
