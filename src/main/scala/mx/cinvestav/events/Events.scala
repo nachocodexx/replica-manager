@@ -49,6 +49,18 @@ object Events {
                          ) extends EventX
 //
   case class DumbObject(objectId:String,objectSize:Long)
+  case class MeasuredServiceTime(
+                              serialNumber: Long,
+                              nodeId: String,
+                              timestamp: Long,
+                              monotonicTimestamp: Long,
+                              objectId:String,
+                              objectSize:Long,
+                              correlationId: String,
+                              eventType: String ="MEASURED_SERVICE_TIME",
+                              eventId: String= UUID.randomUUID().toString,
+                              serviceTimeNanos: Long=0L,
+                                ) extends EventX
 //
 
   def getAndPutsByNode(events:List[EventX]): Map[String, List[EventX]] = {

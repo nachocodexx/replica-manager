@@ -45,23 +45,26 @@ object UploadContraoller {
         currentNodeId      = ctx.config.nodeId
         currentState       <- ctx.state.get
 //        SEMAPHORE
+//        _                 <- currentState.s.acquire
         maybeLB            = currentState.uploadBalancer
         //    calculate available resources from events
         rawEvents          = currentState.events
 //        events             = Events.filterEvents(currentState.events)
 //        events             = Events.orderAndFilterEvents(rawEvents)
-        events             = Events.orderAndFilterEventsMonotonic(rawEvents)
+        events             <- IO.delay{Events.orderAndFilterEventsMonotonic(rawEvents)}
 //        arMap              = Events.getAllNodeXs(events = events).map(x=>x.nodeId->x).toMap
-        arMap              =  ctx.config.uploadLoadBalancer match {
-          case "UF" | "TWO_CHOICES" => Events.getAllNodeXs(
-              events =rawEvents.sortBy(_.monotonicTimestamp)
-            ).map(x=> x.nodeId->x).toMap
-          case "ROUND_ROBIN" | "PSEUDO_RANDOM" => Events.getAllNodeXs(events=events).map(x=>x.nodeId->x).toMap
-//          case "PSEUDO_RANDOM"  => Events.getAllNodeXs(events=events).map(x=>x.nodeId->x).toMap
+        arMap              <- IO.delay{
+            ctx.config.uploadLoadBalancer match {
+            case "UF" | "TWO_CHOICES" => Events.getAllNodeXs(
+                events =rawEvents.sortBy(_.monotonicTimestamp)
+              ).map(x=> x.nodeId->x).toMap
+            case "ROUND_ROBIN" | "PSEUDO_RANDOM" => Events.getAllNodeXs(events=events).map(x=>x.nodeId->x).toMap
+  //          case "PSEUDO_RANDOM"  => Events.getAllNodeXs(events=events).map(x=>x.nodeId->x).toMap
+          }
         }
 //       NO EMPTY LIST OF RD's
         maybeARNodeX       = NonEmptyList.fromList(arMap.values.toList)
-        _                  <- ctx.logger.debug(maybeARNodeX.toString)
+//        _                  <- ctx.logger.debug(maybeARNodeX.toString)
         //   _______________________________________________________________________________
         req                = authReq.req
         headers            = req.headers
@@ -103,8 +106,7 @@ object UploadContraoller {
                        correlationId = operationId
                      )
                    } yield response
-                   case None =>
-                     ctx.errorLogger.error(s"NO_NODES $objectId")*>InternalServerError()
+                   case None => ctx.errorLogger.error(s"NO_NODES $objectId")*>InternalServerError()
                  }
                } yield response
                //      ________________________________
@@ -188,8 +190,8 @@ object UploadContraoller {
 
         }
         //        SEMAPHORE
-//        _ <- currentState.s.release
-        //    get object size
+//        _                 <- currentState.s.release.delayBy(300 milliseconds)
+//        _ <- ctx.logger.debug("RELEASE")
       } yield response
 
     }

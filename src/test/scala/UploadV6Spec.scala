@@ -288,8 +288,8 @@ class UploadV6Spec extends munit .CatsEffectSuite {
 //
       trace  = List(
 //        ________________________________________________________
-//        RequestX(Upload,0,uploadRequest(3000,pdf0Multipart)),
-        RequestX(Upload,0,uploadRequest(3000,pdf1Multipart)),
+        RequestX(Upload,0,uploadRequest(3000,pdf2Multipart)),
+//        RequestX(Upload,0,uploadRequest(3000,pdf1Multipart)),
 //        RequestX(Download,3200,downloadRequest(3000,pdf0Id,pdf0File.length())),
 //            RequestX(Download,3200,downloadRequest(3000,pdf1Id,pdf1File.length())),
 //          RequestX(Upload,3400,uploadRequest(3000,pdf2Multipart)),

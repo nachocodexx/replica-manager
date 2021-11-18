@@ -46,6 +46,8 @@ case class DefaultConfig(
                           defaultCacheSize:Int,
                           defaultCachePolicy:String,
                           defaultCachePort:Int,
-                          hostLogPath:String
+                          hostLogPath:String,
+                          downloadMaxRetry:Int,
+                          downloadBaseDelayMs:Long
                           //                          rabbitmq: RabbitMQClusterConfig
                         )

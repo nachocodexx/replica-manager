@@ -3,6 +3,7 @@ package mx.cinvestav.server.controllers
 import cats.data.NonEmptyList
 import cats.implicits._
 import cats.effect._
+import dev.profunktor.fs2rabbit.effects.Log
 import mx.cinvestav.Declarations.{NodeContext, User}
 import mx.cinvestav.Declarations.Implicits._
 import mx.cinvestav.Helpers
@@ -14,7 +15,7 @@ import mx.cinvestav.events.Events.GetInProgress
 import org.http4s.{AuthedRoutes, Header, Headers, Response}
 import org.http4s.dsl.io._
 import org.typelevel.ci.CIString
-import retry.{RetryDetails, RetryPolicies, retryingOnAllErrors}
+import retry.{RetryDetails, RetryPolicies, retryingOnAllErrors, retryingOnFailures}
 
 import java.util.{Random, UUID}
 //import
@@ -34,16 +35,16 @@ object DownloadController {
 //        _                <- currentState.s.acquire
         rawEvents        = currentState.events
         events           = Events.orderAndFilterEventsMonotonic(rawEvents)
-        currentNodeId  = ctx.config.nodeId
-        schema         = Events.generateDistributionSchema(events = events)
-        arMap          = Events.getAllNodeXs(events = events).map(x=>x.nodeId->x).toMap
-        maybeLocations = schema.get(guid.toString)
-        maybeLB        = currentState.downloadBalancer.getOrElse(PseudoRandom())
-        req            = authReq.req
+        currentNodeId    = ctx.config.nodeId
+        schema           = Events.generateDistributionSchema(events = events)
+        arMap            = Events.getAllNodeXs(events = events).map(x=>x.nodeId->x).toMap
+        maybeLocations   = schema.get(guid.toString)
+//        maybeLB          = currentState.downloadBalancer.getOrElse(PseudoRandom())
+        req              = authReq.req
 //        headers
-        operationId       = req.headers.get(CIString("Operation-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
-        objectSize        = req.headers.get(CIString("Object-Size")).map(_.head.value).flatMap(_.toLongOption).getOrElse(0L)
-        response      <- maybeLocations match {
+        operationId      = req.headers.get(CIString("Operation-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
+        objectSize       = req.headers.get(CIString("Object-Size")).map(_.head.value).flatMap(_.toLongOption).getOrElse(0L)
+        response         <- maybeLocations match {
           case (Some(locations))=> for {
             _                     <- IO.unit
             subsetNodes          = locations.traverse(arMap.get).get.toNel.get
@@ -55,20 +56,8 @@ object DownloadController {
             _                    <- ctx.logger.debug(s"SELECTED_NODE ${maybeSelectedNode.map(_.nodeId)}")
             response             <- maybeSelectedNode match {
               case Some(selectedNode) => for {
-//                now <- IO.realTime.map(_.toMillis)
-//                nowNanos <- IO.monotonic.map(_.toNanos)
                 _                   <- IO.unit
                 selectedNodeId       = selectedNode.nodeId
-//                getInProgress   =  GetInProgress(
-//                  serialNumber = 0,
-//                  nodeId = selectedNodeId,
-//                  timestamp = now,
-//                  objectId  = guid.toString,
-//                  objectSize = objectSize,
-//                  monotonicTimestamp = 0L,
-//                  correlationId = operationId,
-//                )
-//                _                    <- Events.saveEvents(events = List(getInProgress))
                 serviceTimeNanos0    <- IO.monotonic.map(_.toNanos).map(_ - arrivalTimeNanos)
                 //
 //                response             <- Helpers.redirectTo(selectedNode.httpUrl,req)
@@ -141,7 +130,16 @@ object DownloadController {
               case Some(selectedNode) => for {
                 _ <- ctx.logger.debug(s"SELECTED_NODE ${selectedNode.nodeId}")
                 selectedNodeId   = selectedNode.nodeId
+//                response         <- retryingOnFailures[Response[IO]](
+//                  wasSuccessful = (a:Response[IO])=> IO.pure(a.status.code == 200) ,
+//                  onFailure =  (a:Response[IO],d:RetryDetails) => for {
+//                    serviceTimeNanos <- IO.monotonic.map(_.toNanos).map(_ - arrivalTimeNanos)
+//                    _                <- ctx.logger.info(s"DOWNLOAD_RETRY $selectedNodeId $guid $serviceTimeNanos LOCAL $operationId")
+//                  } yield () ,
+//                  policy =  RetryPolicies.limitRetries[IO](maxRetries = ctx.config.downloadMaxRetry) join RetryPolicies.exponentialBackoff[IO]( ctx.config.downloadBaseDelayMs milliseconds)
+//                )(Helpers.redirectTo(selectedNode.httpUrl,req))
                 response         <- Helpers.redirectTo(selectedNode.httpUrl,req)
+//                newResponse <- Ok()
                 responseStatus   = response.status
                 newResponse      <- if(responseStatus.code == 200)
                   {

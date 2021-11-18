@@ -106,6 +106,7 @@ object Declarations {
                         events:List[EventX] = Nil,
                         systemRepSignal:SignallingRef[IO,Boolean],
                         systemSemaphore:Semaphore[IO],
+                        s:Semaphore[IO],
                         serviceReplicationDaemon:Boolean,
                         serviceReplicationThreshold:Double,
                         maxAR:Int,

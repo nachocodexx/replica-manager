@@ -45,6 +45,7 @@ object Main extends IOApp {
     //    s          <- Semaphore[IO](1)
     systemRepSignal <- SignallingRef[IO,Boolean](false)
     systemSemaphore <- Semaphore[IO](1)
+    s               <- Semaphore[IO](1)
     _initState = NodeState(
       status   = commons.status.Up,
       ip       = InetAddress.getLocalHost.getHostAddress,
@@ -58,7 +59,8 @@ object Main extends IOApp {
       balanceTemperature = config.balanceTemperature,
       replicationDaemon = config.replicationDaemon,
       replicationDaemonDelayMillis = config.replicationDaemonDelayMillis,
-      systemSemaphore = systemSemaphore
+      systemSemaphore = systemSemaphore,
+      s=s
     )
     state      <- IO.ref(_initState)
     ctx        = NodeContext(config=config,logger=unsafeLogger,state=state,errorLogger = unsafeErrorLogger)
