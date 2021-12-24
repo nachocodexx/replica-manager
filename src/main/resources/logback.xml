@@ -17,7 +17,8 @@
             <onMatch>ACCEPT</onMatch>
             <onMismatch>DENY</onMismatch>
         </filter>
-        <file>${LOG_PATH}/${NODE_ID}-${bySecond}.txt</file>
+        <file>${LOG_PATH}/${NODE_ID}.txt</file>
+<!--        <file>${LOG_PATH}/${NODE_ID}-${bySecond}.txt</file>-->
         <encoder class="ch.qos.logback.core.encoder.LayoutWrappingEncoder">
             <layout class="mx.cinvestav.log.MySampleLayout" >
                 <nodeId>${NODE_ID}</nodeId>
@@ -27,7 +28,7 @@
 
     <appender name="ERROR-FILE" class="ch.qos.logback.core.FileAppender">
         <!--        <file>error-.log</file>-->
-        <file>${LOG_PATH}/${NODE_ID}-error}.txt</file>
+        <file>${LOG_PATH}/error/${NODE_ID}-error}.txt</file>
         <append>true</append>
         <encoder>
             <pattern>%-4relative [%thread] %-5level %logger{35} - %msg %n</pattern>

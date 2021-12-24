@@ -20,20 +20,18 @@ case class SystemReplication(
   def url:String = s"$protocol://$hostname:$port"
   def apiUrl:String = s"${this.url}/api/$apiVersion"
   def createNodeStr:String = s"${this.apiUrl}/create/cache-node"
-  def createNodeUri:Uri = Uri.unsafeFromString(
-    s"${this.apiUrl}/create/cache-node"
-  )
+  def createNodeUri:Uri = Uri.unsafeFromString(s"http://${hostname}:${port}/api/v6/create/cache-node")
 
 //  def createCacheNode
 }
 
 case class DefaultConfig(
-                          nodeId:String,
-                          poolId:String,
-                          host:String,
                           port:Int,
                           maxRf:Int,
                           maxAr:Int,
+                          nodeId:String,
+                          poolId:String,
+                          host:String,
                           systemReplication:SystemReplication,
                           serviceReplicationDaemon:Boolean,
                           serviceReplicationThreshold:Double,
@@ -48,6 +46,12 @@ case class DefaultConfig(
                           defaultCachePort:Int,
                           hostLogPath:String,
                           downloadMaxRetry:Int,
-                          downloadBaseDelayMs:Long
+                          downloadBaseDelayMs:Long,
+                          dataReplicationStrategy:String="static",
+                          dataReplicationIntervalMs:Long=10000,
+                          returnHostname:Boolean,
+                          cloudEnabled:Boolean,
+                          inMemory:Boolean,
+                          experimentId:String
                           //                          rabbitmq: RabbitMQClusterConfig
                         )

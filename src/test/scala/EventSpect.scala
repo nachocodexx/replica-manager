@@ -1,8 +1,13 @@
 import breeze.linalg._
 import breeze.numerics._
+import fs2.concurrent.SignallingRef
+import mx.cinvestav.Main
 import mx.cinvestav.commons.events.{Push, Replicated}
 import mx.cinvestav.events.Events.GetInProgress
+import mx.cinvestav.replication.DataReplication
+import org.http4s.blaze.client.{BlazeClient, BlazeClientBuilder}
 
+import scala.concurrent.ExecutionContext.global
 import scala.concurrent.duration.Duration
 //import breeze.linalg.di
 import breeze.stats.{mean,stddev}
@@ -47,7 +52,8 @@ class EventSpect extends munit .CatsEffectSuite {
     serviceTimeNanos = 0L
   )
   val basedUploaded = Put(
-    objectId = "F0",
+//    objectId = "F0",
+    objectId = "de42b21f-e0d8-43dd-abb9-75660ffc33d1",
     objectSize = 100,
     nodeId = "cache-0",
     timestamp = 0L,
@@ -69,7 +75,8 @@ class EventSpect extends munit .CatsEffectSuite {
   val baseDownloaded = Get(
     eventId = "event-",
     serialNumber = 0,
-    objectId = "F0",
+//    objectId = "F0",
+    objectId = "de42b21f-e0d8-43dd-abb9-75660ffc33d1",
     objectSize = 100,
     //        nodeId="lb-0",
     nodeId = "cache-0",
@@ -100,6 +107,57 @@ class EventSpect extends munit .CatsEffectSuite {
     serviceTimeNanos = 0
   )
 
+  val rawEvents = List(
+    //    cache-0 ADDED
+    baseAddedNode,
+    //    cache-1 ADDED
+    baseAddedNode.copy(addedNodeId = "cache-1"),
+    //    ______________________________________
+    baseAddedNode.copy(addedNodeId = "cache-2"),
+    //    ______________________________________
+    //    F0 UPLOADED to cache-0
+    basedUploaded,
+    //    F0 DOWNLOADED from cache-0
+    baseDownloaded,
+    baseDownloaded,
+    baseDownloaded,
+    baseDownloaded,
+    //
+//    de42b21f-e0d8-43dd-abb9-75660ffc33d1
+    basedUploaded.copy(objectId = "1f382b76-9383-4902-8ff7-5209fdc03fb3"),
+    baseDownloaded.copy(objectId = "1f382b76-9383-4902-8ff7-5209fdc03fb3"),
+    //    ______________________________________
+    //    F1 UPLOADED to cache-1
+    basedUploaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+    //    (F1 DOWNLOADED from cache-1) x 10
+    baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+    baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+    baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+    baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+    baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+    baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+    baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+    baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+    baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+    baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+//    baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+//    baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+//    baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+//    baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+//    baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+//    baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+//    baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+//
+    basedUploaded.copy(nodeId = "cache-2",objectId = "2fb3c91e-ae26-4874-9283-61fbe87c4372"),
+    baseDownloaded.copy(nodeId = "cache-2",objectId = "2fb3c91e-ae26-4874-9283-61fbe87c4372"),
+    baseDownloaded.copy(nodeId = "cache-2",objectId = "2fb3c91e-ae26-4874-9283-61fbe87c4372"),
+//
+    basedUploaded.copy(nodeId = "cache-1",objectId = "2fb3c91e-ae26-4874-9283-61fbe87c4372"),
+    baseDownloaded.copy(nodeId = "cache-1",objectId = "2fb3c91e-ae26-4874-9283-61fbe87c4372"),
+    baseDownloaded.copy(nodeId = "cache-1",objectId = "2fb3c91e-ae26-4874-9283-61fbe87c4372"),
+
+  )
+
   def preProcessingEvents(events:List[EventX],initTimestamp:Long):List[EventX]= events.zipWithIndex.map{
     case (e, i) => e match {
       case up:Uploaded => up.copy(eventId = s"event-$i",serialNumber = i,timestamp = initTimestamp+i)
@@ -116,9 +174,121 @@ class EventSpect extends munit .CatsEffectSuite {
     }
   }
 //  P(FAi) =
+  test("Main"){
+    for {
+      (client,finalizer) <- BlazeClientBuilder[IO](global).resource.allocated
+      signal       <- SignallingRef[IO,Boolean](false)
+      ctx          <- Main.initContext(client)
+      _            <- ctx.logger.debug("HOLA")
+//      _            <- IO.sleep(1 second)
+      _            <- Events.saveEvents(events= rawEvents)(ctx=ctx)
+      _            <- IO.sleep(1 second)
+      _            <- Events.saveEvents(events = List(
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+      ))(ctx=ctx)
+      _            <- IO.sleep(1 second)
+      _            <- Events.saveEvents(events = List(
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+      ))(ctx=ctx)
+      _            <- IO.sleep(1.5 second)
+      _            <- Events.saveEvents(events = List(
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+        baseDownloaded.copy(nodeId = "cache-1",objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574"),
+      ))(ctx=ctx)
+      currentState <- ctx.state.get
+      events       = currentState.events
+      period       = 1
+      x       = Events.getDownloadsByIntervalByObjectId(objectId = "dcfd6a59-3095-49b7-8e8a-ff6369ed4574")(period.second)(events = events)
+      y = DataReplication.calculateRateOfGrowthDecay(nfs = x)
+      z = DataReplication.averageRateOfGrowthDecay(nfs= x)
+      w = DataReplication.nextNumberOfAccess(nfs=x)
+      _  <- ctx.logger.debug(s"Access per interval: (${period.second})"+x.toString)
+      _ <- ctx.logger.debug("Rate of growth per interval: "+y.toString)
+      _ <- ctx.logger.debug("Average rate of growth: "+z.toString)
+      _ <- ctx.logger.debug("Estimated number of access: "+w.toString)
+//      _            <- ctx.logger.debug(events.length.toString)
+//      orderedObjectIds = Events.getObjectIds(events=events).sorted
+//      orderedDumObjs   = Events.getDumbObject(events=events).sortBy(_.objectId)
+//      orderedNodeIds   = Events.getNodeIds(events=events)
+//      tempMatrix       = Events.generateTemperatureMatrixV2(events=events,0)
+//      x                = Events.generateMatrixV2(events = events,windowTime = 0)
+//      _                <- ctx.logger.debug(x.toString())
+//            sumA             = sum(x(::,*)).t
+//      xx = x(*,::) / sumA
+//      maxDownloadedObj = argmax(sumA)
+//      _                <- ctx.logger.debug(s"SUM_A ${sumA}")
+//      _                <- ctx.logger.debug(s"X $xx")
+//      _                <- ctx.logger.debug(s"MAX_DOWNLOAD $maxDownloadedObj")
+//      _                <- ctx.logger.debug(orderedObjectIds.toString())
+//      _                <- ctx.logger.debug(orderedDumObjs.toString())
+    } yield ()
+  }
+
   test("String hash"){
     val cache0Id = "cache-0"
     val cache1Id = "cache-1"
+    val xs = List.empty[Int]
+    println(xs.sum)
     println(cache0Id.hashCode,cache1Id.hashCode)
   }
 
@@ -171,76 +341,9 @@ class EventSpect extends munit .CatsEffectSuite {
     println(x)
 
 
-    val rawEvents = List(
-//    cache-0 ADDED
-      baseAddedNode,
-//    cache-1 ADDED
-      baseAddedNode.copy(addedNodeId = "cache-1"),
-//    ______________________________________
-      baseAddedNode.copy(addedNodeId = "cache-2"),
-      //    ______________________________________
-//    F0 UPLOADED to cache-0
-      basedUploaded,
-//    F0 DOWNLOADED from cache-0
-      baseDownloaded,
-      baseDownloaded,
-      baseDownloaded,
-      baseDownloaded,
-      basedUploaded.copy(objectId = "F3"),
-      baseDownloaded.copy(objectId = "F3"),
-//    ______________________________________
-//    F1 UPLOADED to cache-1
-      basedUploaded.copy(nodeId = "cache-1",objectId = "F1"),
-//    (F1 DOWNLOADED from cache-1) x 10
-      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
-//      basedUploaded.copy(nodeId = "cache-2",objectId = "F1"),
-      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
-      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
-//
-      baseSetDownloads.copy(nodeId = "cache-1",objectId = "F1",counter = 10),
-      baseDownloaded.copy(nodeId = "cache-1",objectId = "F1"),
 
-      basedUploaded.copy(nodeId = "cache-1",objectId = "F5"),
-      baseDownloaded.copy(nodeId = "cache-1",objectId = "F5"),
-//   Cache-2
-      basedUploaded.copy(nodeId = "cache-2",objectId = "F4"),
-      baseDownloaded.copy(nodeId = "cache-2",objectId = "F4"),
-//
-      baseSetDownloads.copy(nodeId = "cache-2",objectId = "F1",counter = 10),
-      baseDownloaded.copy(nodeId = "cache-2",objectId = "F1"),
-      baseSetDownloads.copy(nodeId = "cache-2",objectId = "F1",counter = 20),
-//    ______________________________________
-      basedUploaded.copy(nodeId = "cache-2",objectId = "F2"),
-      baseDownloaded.copy(nodeId = "cache-2",objectId = "F2"),
-      baseDownloaded.copy(nodeId = "cache-2",objectId = "F2"),
-      //      basedUploaded.copy(nodeId = "cache-0",objectId = "F2"),
-      //      baseDownloaded.copy(nodeId = "cache-0",objectId = "F2"),
-//      baseMissed,
-//      baseMissed,
-//      baseMissed,
-//      baseMissed,
-//      baseMissed,
-////
-//      baseMissed.copy(nodeId = "cache-1"),
 
-    )
+
     val _rawEvents:List[EventX] = EventXOps.OrderOps.byTimestamp(List(
       basedUploaded,
       baseEvicted.copy(fromNodeId = "cache-0",timestamp = 1)
@@ -252,9 +355,18 @@ class EventSpect extends munit .CatsEffectSuite {
 //    val x = Events.getHitCounterByNodeV2(events = events)
 //    println(x.asJson)
     val orderedObjectIds = Events.getObjectIds(events=events).sorted
-    val orderedNodeIds = Events.getNodeIds(events=events)
-    val tempMatrix = Events.generateTemperatureMatrixV2(events=events)
-    val A          = Events.generateMatrixV2(events = events)
+    val orderedNodeIds   = Events.getNodeIds(events=events)
+    val tempMatrix       = Events.generateTemperatureMatrixV2(events=events,0)
+    val A                = Events.generateMatrixV2(events = events,windowTime = 0)
+    println(A)
+    val sumA             = sum(A(::,*))
+    println(sumA)
+    val maxDownloadedObj = argmax(sumA)
+    println(A)
+    println(orderedObjectIds)
+    println(sumA)
+    println(maxDownloadedObj)
+
 //    First approach
 //    println(A.toString)
     val tempVec       = mean(tempMatrix(::,*)).t

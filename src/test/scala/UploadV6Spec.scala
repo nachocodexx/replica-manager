@@ -238,7 +238,7 @@ class UploadV6Spec extends munit .CatsEffectSuite {
 
     val uploadRequest = (port:Int,multipart:Multipart[IO]) =>Request[IO](
       method = Method.POST,
-      uri = Uri.unsafeFromString(s"http://localhost:$port/api/v6/upload"),
+      uri = Uri.unsafeFromString(s"http://localhost:$port/api/v7/uploadv2"),
       httpVersion = HttpVersion.`HTTP/1.1`,
       headers = multipart.headers,
       attributes = Vault.empty
@@ -288,13 +288,52 @@ class UploadV6Spec extends munit .CatsEffectSuite {
 //
       trace  = List(
 //        ________________________________________________________
-        RequestX(Upload,0,uploadRequest(3000,pdf2Multipart)),
-//        RequestX(Upload,0,uploadRequest(3000,pdf1Multipart)),
-//        RequestX(Download,3200,downloadRequest(3000,pdf0Id,pdf0File.length())),
-//            RequestX(Download,3200,downloadRequest(3000,pdf1Id,pdf1File.length())),
-//          RequestX(Upload,3400,uploadRequest(3000,pdf2Multipart)),
-
-//        RequestX(Download,3200,downloadRequest(3000,pdf5Id,pdf5File.length())),
+        RequestX(Upload,0,uploadRequest(3000,pdf0Multipart)),
+//        RequestX(Upload,1000,uploadRequest(3000,pdf1Multipart)),
+//        RequestX(Upload,2000,uploadRequest(3000,pdf2Multipart)),
+//        RequestX(Upload,3000,uploadRequest(3000,pdf3Multipart)),
+//        RequestX(Upload,4000,uploadRequest(3000,pdf4Multipart)),
+//        RequestX(Download,4200,downloadRequest(3000,pdf0Id,pdf0File.length())),
+//        RequestX(Download,5200,downloadRequest(3000,pdf0Id,pdf0File.length())),
+//        RequestX(Download,6200,downloadRequest(3000,pdf0Id,pdf0File.length())),
+//        RequestX(Download,7200,downloadRequest(3000,pdf0Id,pdf0File.length())),
+//        RequestX(Download,1200,downloadRequest(3000,pdf1Id,pdf0File.length())),
+//        RequestX(Download,1200,downloadRequest(3000,pdf1Id,pdf0File.length())),
+//        RequestX(Download,1300,downloadRequest(3000,pdf1Id,pdf0File.length())),
+//        RequestX(Download,9400,downloadRequest(3000,pdf1Id,pdf1File.length())),
+//        RequestX(Download,9500,downloadRequest(3000,pdf2Id,pdf2File.length())),
+//        RequestX(Download,9600,downloadRequest(3000,pdf3Id,pdf3File.length())),
+//        RequestX(Download,9700,downloadRequest(3000,pdf4Id,pdf4File.length())),
+//        RequestX(Download,9700,downloadRequest(3000,pdf4Id,pdf4File.length())),
+//        RequestX(Download,9700,downloadRequest(3000,pdf4Id,pdf4File.length())),
+//        RequestX(Download,9200,downloadRequest(3000,pdf0Id,pdf0File.length())),
+//        RequestX(Download,9200,downloadRequest(3000,pdf0Id,pdf0File.length())),
+//        RequestX(Download,9200,downloadRequest(3000,pdf0Id,pdf0File.length())),
+//        RequestX(Download,9700,downloadRequest(3000,pdf4Id,pdf4File.length())),
+//        RequestX(Download,9200,downloadRequest(3000,pdf0Id,pdf0File.length())),
+//        RequestX(Download,9700,downloadRequest(3000,pdf4Id,pdf4File.length())),
+//        RequestX(Download,9200,downloadRequest(3000,pdf0Id,pdf0File.length())),
+//        RequestX(Download,9700,downloadRequest(3000,pdf4Id,pdf4File.length())),
+//        RequestX(Download,9200,downloadRequest(3000,pdf0Id,pdf0File.length())),
+//        RequestX(Download,9200,downloadRequest(3000,pdf0Id,pdf0File.length())),
+//        RequestX(Download,9700,downloadRequest(3000,pdf4Id,pdf4File.length())),
+//        RequestX(Download,9200,downloadRequest(3000,pdf0Id,pdf0File.length())),
+//        RequestX(Download,9200,downloadRequest(3000,pdf0Id,pdf0File.length())),
+//        RequestX(Download,9200,downloadRequest(3000,pdf0Id,pdf0File.length())),
+//        RequestX(Download,9700,downloadRequest(3000,pdf4Id,pdf4File.length())),
+//        RequestX(Download,9200,downloadRequest(3000,pdf0Id,pdf0File.length())),
+////          RequestX(Upload,3400,uploadRequest(3000,pdf2Multipart)),
+//        RequestX(Download,9200,downloadRequest(3000,pdf0Id,pdf0File.length())),
+//        RequestX(Download,9700,downloadRequest(3000,pdf4Id,pdf4File.length())),
+//        RequestX(Download,9200,downloadRequest(3000,pdf0Id,pdf0File.length())),
+//        RequestX(Download,9700,downloadRequest(3000,pdf4Id,pdf4File.length())),
+//        RequestX(Download,9200,downloadRequest(3000,pdf0Id,pdf0File.length())),
+//
+//        RequestX(Download,9200,downloadRequest(3000,pdf0Id,pdf0File.length())),
+//        RequestX(Download,9700,downloadRequest(3000,pdf4Id,pdf4File.length())),
+//        RequestX(Download,9200,downloadRequest(3000,pdf0Id,pdf0File.length())),
+////        RequestX(Download,3200,downloadRequest(3000,pdf5Id,pdf5File.length())),
+//        RequestX(Download,9700,downloadRequest(3000,pdf4Id,pdf4File.length())),
 //        RequestX(Upload,0,uploadRequest(3000,pdf1Multipart)),
 //        RequestX(Download,4200,downloadRequest(3000,pdf2Id,pdf2File.length())),
 //          RequestX(Upload,0,uploadRequest(3000,pdf2Multipart)),
@@ -324,7 +363,13 @@ class UploadV6Spec extends munit .CatsEffectSuite {
               val sinkPath = Paths.get(SINK_FOLDER+s"/$resultId.pdf")
               body.through(Files[IO].writeAll(sinkPath)) ++ fs2.Stream.eval(IO.println(response))
             }
-            else fs2.Stream.eval(IO.unit) ++ fs2.Stream.eval(IO.println(response))
+            else  for {
+//               nodeURL <- response.as[String]
+//                _        <- client.stream(
+//                  Request[IO](method = P)
+//                )
+               _<-             fs2.Stream.eval(IO.unit) ++ fs2.Stream.eval(IO.println(response))
+            } yield ()
           }.compile.drain
           endTime  <- IO.realTime.map(_.toMillis)
           time     = endTime-initTime

@@ -3,7 +3,7 @@ import sbt._
 
 object Dependencies {
   def apply(): Seq[ModuleID] = {
-    lazy val RabbitMQUtils = "mx.cinvestav" %% "rabbitmq-utils" % "0.3.3"
+//    lazy val RabbitMQUtils = "mx.cinvestav" %% "rabbitmq-utils" % "0.3.3"
     lazy val Commons = "mx.cinvestav" %% "commons" % "0.0.5"
     lazy val PureConfig = "com.github.pureconfig" %% "pureconfig" % "0.15.0"
     lazy val MUnitCats ="org.typelevel" %% "munit-cats-effect-3" % "1.0.3" % Test
@@ -14,6 +14,13 @@ object Dependencies {
     val catsRetryVersion = "3.1.0"
     lazy val CatsRetry = "com.github.cb372" %% "cats-retry" % catsRetryVersion
     lazy val Breeze = "org.scalanlp" %% "breeze" % "1.2"
+    lazy val Logback   = "ch.qos.logback" % "logback-classic" % "1.2.3"
+    val circeVersion = "0.14.1"
+    lazy val Circe = Seq(
+      "io.circe" %% "circe-core",
+      "io.circe" %% "circe-generic",
+      "io.circe" %% "circe-parser"
+    ).map(_ % circeVersion)
 //    val catsRetryVersion = "3.1.0"
 //    lazy val CatsRetry = "com.github.cb372" %% "cats-retry" % catsRetryVersion,
 //
@@ -24,7 +31,7 @@ object Dependencies {
       "org.http4s" %% "http4s-blaze-client",
       "org.http4s" %% "http4s-circe"
     ).map(_ % http4sVersion)
-    Seq(RabbitMQUtils,PureConfig,Commons,MUnitCats,Log4Cats,ScalaCompress,Mules,CatsNIO,CatsRetry,Breeze) ++Http4s
+    Seq(Logback,PureConfig,Commons,MUnitCats,Log4Cats,ScalaCompress,Mules,CatsNIO,CatsRetry,Breeze) ++Http4s++Circe
   }
 }
 

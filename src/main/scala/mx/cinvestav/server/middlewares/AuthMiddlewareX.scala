@@ -21,8 +21,7 @@ object AuthMiddlewareX {
       //      _          <- OptionT.liftF(ctx.logger.debug(maybeUserId.toString+"//"+maybeBucketName.toString))
       ress            <- (maybeUserId,maybeBucketName) match {
         case (Some(userId),Some(bucketName)) =>   for {
-          x  <- OptionT.liftF(User(id = UUID.fromString(userId),bucketName=bucketName  ).pure[IO])
-          //          _  <- OptionT.liftF(ctx.logger.debug("AUTHORIZED"))
+          x  <- OptionT.liftF(User(id = userId,bucketName=bucketName  ).pure[IO])
         } yield x
         case (Some(_),None) => OptionT.none[IO,User]
         case (None,Some(_)) => OptionT.none[IO,User]

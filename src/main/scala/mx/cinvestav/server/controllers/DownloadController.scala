@@ -3,7 +3,6 @@ package mx.cinvestav.server.controllers
 import cats.data.NonEmptyList
 import cats.implicits._
 import cats.effect._
-import dev.profunktor.fs2rabbit.effects.Log
 import mx.cinvestav.Declarations.{NodeContext, User}
 import mx.cinvestav.Declarations.Implicits._
 import mx.cinvestav.Helpers
@@ -121,7 +120,7 @@ object DownloadController {
               _                  <- ctx.logger.debug("ALL NODES ARE FULL - SELECT A NODE RANDOMLY")
               maybeSelectedNode  = Events.balanceByReplica(downloadBalancer = "PSEUDO_RANDOM")(guid= guid.toString,arMap = arMap,events=events)
 //              _                 <- if( (nodes.length < currentState.maxAR) && ctx.config.serviceReplicationDaemon)
-                _ <- if(currentState.serviceReplicationDaemon) Helpers.createNode().start.void else IO.unit
+//                _ <- if(currentState.serviceReplicationDaemon) Helpers.createNode().start.void else IO.unit
 //              else IO.unit
             } yield maybeSelectedNode
             else nodesWithAvailablePages.maxByOption(_.availableCacheSize).pure[IO]

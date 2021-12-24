@@ -3,6 +3,7 @@ import fs2.io.file.Files
 import io.circe.{Decoder, HCursor}
 import mx.cinvestav.commons.events.{AddedNode, Downloaded, EventX, EventXOps, Evicted, Get, Missed, Put, Uploaded}
 import mx.cinvestav.events.Events
+import org.http4s.Uri
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.Paths
@@ -27,6 +28,19 @@ class EventParserSpect extends munit .CatsEffectSuite {
         case "ADDED_NODE" => hCursor.as[AddedNode]
       }
     } yield decoded
+  }
+  test("Uri"){
+    val  hostname= "system-rep-0"
+    val port = 1025
+    val uri = Uri.fromString(s"http://localhost:1025/api/v6/create/cache-node")
+//    IO.println(uri)
+    uri match {
+      case Left(value) =>
+        IO.println(s"ERROR $value")
+      case Right(value) =>
+        IO.println(s"URI $value")
+    }
+
   }
   test("Basics"){
     val eventsString = Files[IO]

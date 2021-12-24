@@ -1,24 +1,20 @@
 package mx.cinvestav
-import breeze.linalg._
-import cats.data.NonEmptyList
-import cats.effect.std.Semaphore
+import cats.effect.std.{Queue, Semaphore}
 import fs2.concurrent.SignallingRef
-import mx.cinvestav.commons.events.Uploaded
-import org.http4s.Request
-import org.http4s.blaze.client.BlazeClientBuilder
-//{*, sum}
 import cats.implicits._
 import cats.effect._
-import dev.profunktor.fs2rabbit.config.Fs2RabbitConfig
-import mx.cinvestav.commons.events.EventXOps
-import mx.cinvestav.events.Events
+import org.http4s.blaze.client.BlazeClientBuilder
+import org.http4s.client.Client
+
+import java.util.concurrent.{ExecutorService, Executors}
+import scala.concurrent.ExecutionContext
+import scala.concurrent.ExecutionContext.global
 //
 //import mx.cinvestav.commons.eve
 import mx.cinvestav.Declarations.{NodeContext, NodeState}
 import mx.cinvestav.Declarations.Implicits._
 import mx.cinvestav.config.DefaultConfig
 import mx.cinvestav.server.HttpServer
-import mx.cinvestav.utils.RabbitMQUtils
 //
 import org.typelevel.log4cats.{Logger, SelfAwareStructuredLogger}
 import org.typelevel.log4cats.slf4j.Slf4jLogger
@@ -37,21 +33,21 @@ import java.net.InetAddress
 
 object Main extends IOApp {
   implicit val config: DefaultConfig = ConfigSource.default.loadOrThrow[DefaultConfig]
+  val threadPool = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(5))
 //  val rabbitMQConfig: Fs2RabbitConfig  = RabbitMQUtils.parseRabbitMQClusterConfig(config.rabbitmq)
   implicit val unsafeLogger: SelfAwareStructuredLogger[IO] = Slf4jLogger.getLogger[IO]
   val unsafeErrorLogger: SelfAwareStructuredLogger[IO] = Slf4jLogger.getLoggerFromName("error")
-  def initContext(): IO[NodeContext] = for {
+  def initContext(client:Client[IO]): IO[NodeContext] = for {
     _          <- Logger[IO].debug(s"CACHE_POOL[${config.nodeId}]")
     //    s          <- Semaphore[IO](1)
-    systemRepSignal <- SignallingRef[IO,Boolean](false)
+    signalRef <- SignallingRef[IO,Boolean](false)
     systemSemaphore <- Semaphore[IO](1)
-    s               <- Semaphore[IO](1)
     _initState = NodeState(
       status   = commons.status.Up,
       ip       = InetAddress.getLocalHost.getHostAddress,
 //      s        = s,
       downloadBalancerToken = config.downloadLoadBalancer,
-      systemRepSignal = systemRepSignal,
+//      systemRepSignal = systemRepSignal,
       serviceReplicationThreshold = config.serviceReplicationThreshold,
       maxAR = config.maxAr,
       maxRF = config.maxRf,
@@ -60,18 +56,29 @@ object Main extends IOApp {
       replicationDaemon = config.replicationDaemon,
       replicationDaemonDelayMillis = config.replicationDaemonDelayMillis,
       systemSemaphore = systemSemaphore,
-      s=s
+      experimentId = config.experimentId,
+      replicationStrategy = config.dataReplicationStrategy,
+      replicationDaemonSingal = signalRef
     )
     state      <- IO.ref(_initState)
-    ctx        = NodeContext(config=config,logger=unsafeLogger,state=state,errorLogger = unsafeErrorLogger)
+    ctx        = NodeContext(config=config,logger=unsafeLogger,state=state,errorLogger = unsafeErrorLogger,client=client)
   } yield ctx
 
   override def run(args: List[String]): IO[ExitCode] = {
     for {
-          ctx <- initContext()
-          _ <- Helpers.replicationDaemon(period = config.replicationDaemonDelayMillis milliseconds)(ctx=ctx).start.void
-          _ <- Helpers.serviceReplicationDaemon(period = config.serviceReplicationDaemonDelay milliseconds)(ctx=ctx).start.void
-          _ <- HttpServer.run()(ctx=ctx )
+//      sUpload      <- Semaphore[IO](1)
+      (client,finalizer) <- BlazeClientBuilder[IO](global)
+        .withDefaultSocketReuseAddress
+        .resource.allocated
+      sDownload          <- Semaphore[IO](1)
+      sReplication       <- Semaphore[IO](1)
+//      sysRepSema         <- Semaphore[IO](1)
+      signalRef          <- SignallingRef.of[IO,Boolean](false)
+      ctx                <- initContext(client)
+      _                  <- Helpers.replicationDaemon(sReplication,period = config.replicationDaemonDelayMillis milliseconds,signalRef)(ctx=ctx).startOn(threadPool).void
+      _                  <- Helpers.serviceReplicationDaemon(s=signalRef,period = config.serviceReplicationDaemonDelay milliseconds)(ctx=ctx).start.void
+      _                  <- HttpServer.run(sDownload)(ctx=ctx )
+      _                  <- finalizer
     } yield (ExitCode.Success)
   }
 }

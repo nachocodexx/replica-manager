@@ -3,8 +3,11 @@ package mx.cinvestav.server.controllers
 import cats.implicits._
 import cats.effect._
 import mx.cinvestav.commons.events.UpdatedNodePort
+
+import scala.collection.immutable.ListMap
 //
 import mx.cinvestav.Declarations.NodeContext
+import mx.cinvestav.Declarations.Implicits._
 import mx.cinvestav.events.Events
 //
 import org.http4s._
@@ -26,17 +29,17 @@ object StatsController {
         rawEvents          = currentState.events
 //        events             = Events.filterEvents(events = currentState.events)
 //        events             = Events.orderAndFilterEvents(events = rawEvents)
-        events             = Events.orderAndFilterEventsMonotonic(events = rawEvents)
+        events             = Events.orderAndFilterEventsMonotonicV2(events = rawEvents)
 //          Events.filterEvents(events = currentState.events)
         ars                = Events.getAllNodeXs(events=events)
-          .map{
-            case node =>
-              val ops = Events.getOperationsByNodeId(nodeId = node.nodeId,events=rawEvents)
-              val gets = ops.count(_.eventType=="GET")
-              val puts = ops.count(_.eventType=="PUT")
+          .map {
+            node =>
+              val ops = Events.getOperationsByNodeId(nodeId = node.nodeId, events = rawEvents)
+              val gets = ops.count(_.eventType == "GET")
+              val puts = ops.count(_.eventType == "PUT")
               node.copy(
-                metadata =Map(
-                  "TOTAL_REQUESTS" -> (gets+puts).toString,
+                metadata = Map(
+                  "TOTAL_REQUESTS" -> (gets + puts).toString,
                   "DOWNLOAD_REQUESTS" -> gets.toString,
                   "UPLOAD_REQUESTS" -> puts.toString,
                 )
@@ -52,7 +55,9 @@ object StatsController {
               nodeId -> counter.filter(_._2>0)
           }
         hitRatioInfo       = Events.getGlobalHitRatio(events=events)
-        tempMatrix         = Events.generateTemperatureMatrixV2(events = events)
+        tempMatrix         = Events.generateTemperatureMatrixV2(events = events,windowTime = 0)
+        tempMatrix0         = Events.generateTemperatureMatrixV3(events = events,windowTime = 0)
+        replicaUtilization = Events.generateReplicaUtilization(events =events)
         nodeIds            = Events.getNodeIds(events = events)
 //        hostPorts          = Events.getAllUpdatedNodePort(events=events)
 //        hostPortsMap       = Events.getAllUpdatedNodePort(events=events).map(_.asInstanceOf[UpdatedNodePort]).map(x=>x.nodeId->x.newPort).toMap
@@ -115,7 +120,12 @@ object StatsController {
           "objectIds" -> objectsIds.sorted.asJson,
           "nodeIds" -> nodeIds.asJson,
           "hitCounterByNode"-> hitCounter.asJson,
+//            .map{
+//            case (nodeId,objects)=> nodeId -> ListMap(objects.toList.sortBy(_._2).reverse :_*)
+//          }.asJson,
           "tempMatrix" -> tempMatrix.toArray.asJson,
+          "tempMatrix0" -> tempMatrix0.toArray.asJson,
+          "replicaUtilization" -> replicaUtilization.toArray.asJson,
           "hitInfo" -> hitRatioInfo.asJson,
           "loadBalancing" -> Json.obj(
             "download" -> currentState.downloadBalancerToken.asJson,
@@ -123,7 +133,9 @@ object StatsController {
           ),
           "maxReplicationFactor" -> currentState.maxRF.asJson,
           "maxAvailableResources" -> currentState.maxAR.asJson,
-          "serviceTimes" -> serviceTimeByNode.asJson
+          "serviceTimes" -> serviceTimeByNode.asJson,
+          "replicationStrategy" -> ctx.config.dataReplicationStrategy.asJson,
+          "monitoring"-> currentState.monitoringEx.asJson
         )
         response <- Ok(stats.asJson)
       } yield response

@@ -28,9 +28,11 @@ object EventsControllers {
         rawEvents    = currentState.events
         events       = filtered match {
           case Some(isFiltered) =>
-            if(isFiltered ) Events.filterEvents(events = EventXOps.OrderOps.byTimestamp(events=rawEvents).reverse)
-            else EventXOps.OrderOps.byTimestamp(rawEvents).reverse
-          case None => EventXOps.OrderOps.byTimestamp(rawEvents).reverse
+            if(isFiltered ) Events.orderAndFilterEventsMonotonicV2(events=rawEvents)
+//              Events.filterEvents(events = EventXOps.OrderOps.byTimestamp(events=rawEvents).reverse)
+            else rawEvents.sortBy(_.monotonicTimestamp)
+          case None => rawEvents.sortBy(_.monotonicTimestamp)
+//            EventXOps.OrderOps.byTimestamp(rawEvents).reverse
         }
 
         response     <- Ok(events.asJson)

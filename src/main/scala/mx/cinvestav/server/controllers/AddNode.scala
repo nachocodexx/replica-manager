@@ -2,6 +2,7 @@ package mx.cinvestav.server.controllers
 
 import cats.effect._
 import mx.cinvestav.Declarations.NodeContext
+import mx.cinvestav.Helpers
 import mx.cinvestav.commons.events.AddedNode
 import mx.cinvestav.commons.types.NodeX
 import mx.cinvestav.events.Events
@@ -32,6 +33,7 @@ object AddNode {
       nodes            = Events.onlyAddedNode(events=events)
       response         <- if(nodes.length < currentState.maxAR) for {
 
+//        payload          <- req.as[AddCacheNode]
         payload          <- req.as[AddCacheNode]
         eventId          = UUID.randomUUID()
         headers          = req.headers
@@ -39,6 +41,8 @@ object AddNode {
         operationId      = headers.get(CIString("Operation-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
         latency          = timestamp.map(arrivalTime - _)
         //    __________________________________________________
+        newEvent         = Helpers.getMonitoringStatsFromHeaders(payload.nodeId,arrivalTime)(headers)
+        _ <- Events.saveMonitoringEvents(event= newEvent)
         newNode = payload.nodeId ->  NodeX(
           nodeId = payload.nodeId,
           ip = payload.ip,
@@ -48,9 +52,9 @@ object AddNode {
           availableStorageCapacity = payload.availableStorageCapacity,
           usedStorageCapacity = 0L,
           //
-          totalMemoryCapacity =payload.totalMemoryCapacity,
-          availableMemoryCapacity = payload.totalMemoryCapacity,
-          usedMemoryCapacity = 0L,
+//          totalMemoryCapacity =payload.totalMemoryCapacity,
+//          availableMemoryCapacity = payload.totalMemoryCapacity,
+//          usedMemoryCapacity = 0L,
           availableCacheSize= payload.cacheSize,
           cacheSize =payload.cacheSize,
           usedCacheSize = 0,
@@ -79,7 +83,7 @@ object AddNode {
             )
           )
         )
-        _           <- ctx.logger.info(s"ADD_NODE $eventId $serviceTimeNanos $operationId")
+//        _           <- ctx.logger.info(s"ADD_NODE $eventId $serviceTimeNanos $operationId")
         response    <- Ok("ADD_NODE")
       } yield response
       else Ok()

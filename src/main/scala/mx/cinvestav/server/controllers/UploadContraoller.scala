@@ -4,6 +4,7 @@ import retry._
 import cats.data.NonEmptyList
 import cats.implicits._
 import cats.effect._
+import mx.cinvestav.commons.events.Put
 import org.http4s.Response
 //
 import mx.cinvestav.Declarations.{NodeContext, User}
@@ -83,9 +84,9 @@ object UploadContraoller {
                //       _______________________________________
                case (Some(lb),Some(nodes)) => for {
                  maybeNode     <- IO.delay{lb.balance(objectSize = objectSize,nodes=nodes)}
+//                 _             <-
                  response      <- maybeNode match {
                    case Some(node) => for {
-
                      _           <- IO.unit
                      retryPolicy = RetryPolicies.limitRetries[IO](5) join RetryPolicies.exponentialBackoff[IO](2 seconds )
                      response             <- retryingOnAllErrors[Response[IO]](
@@ -115,7 +116,6 @@ object UploadContraoller {
                  maybeSelectedNode <- IO.delay{lb.balance(objectSize = objectSize,nodes)}
                  response          <- maybeSelectedNode match {
                    case Some(node) => for {
-
                      _ <- IO.unit
                      retryPolicy = RetryPolicies.limitRetries[IO](5) join RetryPolicies.exponentialBackoff[IO](2 seconds )
                      response             <- retryingOnAllErrors[Response[IO]](
@@ -147,34 +147,35 @@ object UploadContraoller {
                case (None,None) => for {
                  _                 <- ctx.logger.debug("LB -> 0 - NODES -> 0")
                  lb                <- Helpers.initLoadBalancerV3(ctx.config.uploadLoadBalancer)
-                 systemRepResponseMaybe <- Helpers.createNode()
-                 response         <- systemRepResponseMaybe match {
-                   case Some(systemRepResponse) => for {
-                     _                 <- ctx.logger.debug("HEREEE!")
-                     tryRedirectUpload =  Helpers.redirectTo(systemRepResponse.url,req)
-                     retryExponential  = RetryPolicies.limitRetries[IO](10) join RetryPolicies.exponentialBackoff[IO](baseDelay = 1 seconds)
-                     response          <- retryingOnAllErrors[Response[IO]](
-                       policy = retryExponential,
-                       onError=(e:Throwable,details:RetryDetails) =>{
-                         ctx.errorLogger.error(e.getMessage)*> ctx.errorLogger.error(details.toString)
-                       }
-                     )(tryRedirectUpload)
-
-                     _ <- ctx.logger.debug(response.toString())
-                     _             <- Helpers.uploadSameLogic(
-                       userId =  user.id.toString,
-                       nodeId = systemRepResponse.nodeId,
-                       currentNodeId = currentNodeId,
-                       objectId = objectId,
-                       objectSize = objectSize,
-                       arrivalTimeNanos = arrivalTimeNanos,
-                       response = response,
-                       correlationId = operationId
-                     )
-
-                   } yield response
-                   case None => ctx.errorLogger.error("ERROR_CREATED_NODE") *> InternalServerError()
-                 }
+////                 systemRepResponseMaybe <- Helpers.createNode()
+                 response  <- Ok()
+//                 response         <- systemRepResponseMaybe match {
+//                   case Some(systemRepResponse) => for {
+//                     _                 <- ctx.logger.debug("HEREEE!")
+//                     tryRedirectUpload =  Helpers.redirectTo(systemRepResponse.url,req)
+//                     retryExponential  = RetryPolicies.limitRetries[IO](10) join RetryPolicies.exponentialBackoff[IO](baseDelay = 1 seconds)
+//                     response          <- retryingOnAllErrors[Response[IO]](
+//                       policy = retryExponential,
+//                       onError=(e:Throwable,details:RetryDetails) =>{
+//                         ctx.errorLogger.error(e.getMessage)*> ctx.errorLogger.error(details.toString)
+//                       }
+//                     )(tryRedirectUpload)
+//
+//                     _ <- ctx.logger.debug(response.toString())
+//                     _             <- Helpers.uploadSameLogic(
+//                       userId =  user.id.toString,
+//                       nodeId = systemRepResponse.nodeId,
+//                       currentNodeId = currentNodeId,
+//                       objectId = objectId,
+//                       objectSize = objectSize,
+//                       arrivalTimeNanos = arrivalTimeNanos,
+//                       response = response,
+//                       correlationId = operationId
+//                     )
+//
+//                   } yield response
+//                   case None => ctx.errorLogger.error("ERROR_CREATED_NODE") *> InternalServerError()
+//                 }
                } yield response
              }
 

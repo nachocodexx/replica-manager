@@ -1,18 +1,16 @@
 package mx.cinvestav.server.controllers
 
 import cats.effect._
+import cats.effect.std.Semaphore
 import mx.cinvestav.Declarations.NodeContext
 import mx.cinvestav.Helpers
-import mx.cinvestav.commons.events.AddedNode
-import mx.cinvestav.commons.types.NodeX
 import mx.cinvestav.events.Events
-
-import java.util.UUID
-//
 import org.http4s.HttpRoutes
 import org.http4s.circe.CirceEntityDecoder._
 import org.http4s.circe.CirceEntityEncoder._
 import org.http4s.dsl.io._
+import scala.concurrent.duration._
+import scala.language.postfixOps
 //
 import io.circe.generic.auto._
 import io.circe.syntax._
@@ -25,6 +23,7 @@ object UpdateConfig {
 
   def apply()(implicit ctx:NodeContext) = HttpRoutes.of[IO]{
     case req@POST  -> Root  => for {
+      _                <- ctx.logger.debug("UPDATE_CONFIG")
       currentState     <- ctx.state.get
       rawEvents        = currentState.events
       events           = Events.orderAndFilterEventsMonotonic(events=rawEvents)
@@ -37,12 +36,11 @@ object UpdateConfig {
       maxRF            = headers.get(CIString("Max-Replication-Factor")).flatMap(_.head.value.toIntOption).getOrElse(ctx.config.maxRf)
       balanceTemp      = headers.get(CIString("Balance-Temperature")).flatMap(_.head.value.toBooleanOption).getOrElse(ctx.config.balanceTemperature)
       serviceRepDaemon = headers.get(CIString("Service-Replication-Daemon")).flatMap(_.head.value.toBooleanOption).getOrElse(ctx.config.serviceReplicationDaemon)
+      repStrategy               = headers.get(CIString("Replication-Strategy")).map(_.head.value).getOrElse(ctx.config.dataReplicationStrategy)
       repDaemon                 = headers.get(CIString("Replication-Daemon")).flatMap(_.head.value.toBooleanOption).getOrElse(ctx.config.replicationDaemon)
       repDaemonMillis           = headers.get(CIString("Replication-Daemon-Delay-Millis")).flatMap(_.head.value.toLongOption).getOrElse(ctx.config.replicationDaemonDelayMillis)
       serviceRepDaemonThreshold = headers.get(CIString("Service-Replication-Threshold")).flatMap(_.head.value.toDoubleOption).getOrElse(ctx.config.serviceReplicationThreshold)
 //      UPDATE UPLOAD LB
-      _                <- Helpers.initLoadBalancerV3(uploadBalancer)
-      //      UPDATE DOWNLOAD LB
       _                <- ctx.state.update(x => x.copy(
         downloadBalancerToken = downLoadBalancer,
         maxAR = maxAR,
@@ -51,12 +49,20 @@ object UpdateConfig {
         serviceReplicationThreshold = serviceRepDaemonThreshold,
         balanceTemperature = balanceTemp,
         replicationDaemon = repDaemon,
-        replicationDaemonDelayMillis = repDaemonMillis
+        replicationDaemonDelayMillis = repDaemonMillis,
+        replicationStrategy = repStrategy,
+        experimentId = ctx.config.experimentId
       ))
-      arrivalTime      <- IO.realTime.map(_.toMillis)
-      arrivalTimeNanos <- IO.monotonic.map(_.toNanos)
-
-      response    <- Ok("UPDATED_BALANCER")
+      _                <- if(repStrategy == "none") currentState.replicationDaemonSingal.set(true)
+      else for {
+        _ <- currentState.replicationDaemonSingal.set(true)
+        s <- Semaphore[IO](1)
+        _ <- currentState.replicationDaemonSingal.set(false)
+        _ <- Helpers.replicationDaemon(s,period = repDaemonMillis.milliseconds,signal = currentState.replicationDaemonSingal).start.void
+      } yield ()
+      _                <- Helpers.initLoadBalancerV3(uploadBalancer)
+      //      UPDATE DOWNLOAD LB
+      response    <- NoContent()
     } yield  response
   }
 

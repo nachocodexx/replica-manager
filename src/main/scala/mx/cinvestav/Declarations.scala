@@ -1,16 +1,18 @@
 package mx.cinvestav
 
-import cats.Order
+import cats.{Id, Order}
 import cats.data.NonEmptyList
 import cats.effect.std.Semaphore
-import cats.effect.{IO, Ref}
+import cats.effect.{FiberIO, IO, Ref}
 import mx.cinvestav.commons.balancer.v2.Balancer
 import mx.cinvestav.commons.status.Status
 import mx.cinvestav.config.DefaultConfig
 import mx.cinvestav.commons.types.NodeX
 import mx.cinvestav.commons.balancer.v3.{Balancer => BalancerV3}
 import mx.cinvestav.commons.events.{AddedNode, Del, Downloaded, EventX, Evicted, Get, Missed, ObjectHashing, Push, Put, RemovedNode, Replicated, UpdatedNodePort, Uploaded, Pull => PullEvent, TransferredTemperature => SetDownloads}
-import mx.cinvestav.events.Events.GetInProgress
+import mx.cinvestav.events.Events.{GetInProgress, HotObject, MeasuredServiceTime, MonitoringStats}
+import org.http4s.blaze.client.BlazeClientBuilder
+import org.http4s.client.Client
 //
 import io.circe._
 import io.circe.generic.auto._
@@ -19,6 +21,7 @@ import io.circe.syntax._
 import org.typelevel.log4cats.Logger
 //
 import fs2.concurrent.SignallingRef
+import cats.effect.std.Queue
 
 import java.io.ByteArrayOutputStream
 import java.util.UUID
@@ -48,6 +51,9 @@ object Declarations {
           case "GET_IN_PROGRESS" => hCursor.as[GetInProgress]
           case "OBJECT_HASHING" => hCursor.as[ObjectHashing]
           case "UPDATED_NODE_PORT" => hCursor.as[UpdatedNodePort]
+          case "MEASURED_SERVICE_TIME" => hCursor.as[MeasuredServiceTime]
+          case "HOT_OBJECT" => hCursor.as[HotObject]
+          case "MONITORING_STATS" => hCursor.as[MonitoringStats]
         }
       } yield decoded
     }
@@ -68,11 +74,15 @@ object Declarations {
       case sd:GetInProgress => sd.asJson
       case sd:ObjectHashing => sd.asJson
       case sd:UpdatedNodePort => sd.asJson
+      case sd:MeasuredServiceTime => sd.asJson
+      case hot:HotObject => hot.asJson
+      case hot:MonitoringStats => hot.asJson
+
     }
   }
 
 
-  case class User(id:UUID,bucketName:String)
+  case class User(id:String,bucketName:String)
 
 //  case class NodeX(nodeId:String, ip:String, port:Int, metadata:Map[String,String]= Map.empty[String,String]){
 //    def httpUrl = s"http://$ip:$port"
@@ -104,9 +114,10 @@ object Declarations {
                         downloadBalancerToken:String="ROUND_ROBIN",
                         extraDownloadBalancer:Option[BalancerV3]= None,
                         events:List[EventX] = Nil,
-                        systemRepSignal:SignallingRef[IO,Boolean],
+                        monitoringEvents:List[EventX]= Nil,
+                        monitoringEx:Map[String,EventX]= Map.empty[String,EventX],
+//                        systemRepSignal:SignallingRef[IO,Boolean],
                         systemSemaphore:Semaphore[IO],
-                        s:Semaphore[IO],
                         serviceReplicationDaemon:Boolean,
                         serviceReplicationThreshold:Double,
                         maxAR:Int,
@@ -114,13 +125,16 @@ object Declarations {
                         balanceTemperature:Boolean,
                         replicationDaemon:Boolean,
                         replicationDaemonDelayMillis:Long,
-
+                        replicationStrategy:String,
+                        experimentId:String,
+                        replicationDaemonSingal:SignallingRef[IO,Boolean]
                         )
   case class NodeContext(
                             config: DefaultConfig,
                             logger: Logger[IO],
                             errorLogger: Logger[IO],
                             state:Ref[IO,NodeState],
+                            client:Client[IO]
 //                            rabbitMQContext:Option[RabbitMQContext]
                           )
 }
