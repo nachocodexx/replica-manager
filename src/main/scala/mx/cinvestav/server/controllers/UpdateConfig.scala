@@ -22,7 +22,7 @@ object UpdateConfig {
 //  case class Payload(nodeId:String, ip:String, port:Int, metadata:Map[String,String])
 
   def apply()(implicit ctx:NodeContext) = HttpRoutes.of[IO]{
-    case req@POST  -> Root  => for {
+    case req@POST  -> Root / "update" =>  for {
       _                <- ctx.logger.debug("UPDATE_CONFIG")
       currentState     <- ctx.state.get
       rawEvents        = currentState.events

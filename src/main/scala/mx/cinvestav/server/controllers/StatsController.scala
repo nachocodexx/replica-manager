@@ -24,7 +24,7 @@ object StatsController {
   def apply()(implicit ctx:NodeContext): HttpRoutes[IO] = {
 
     HttpRoutes.of[IO]{
-      case GET -> Root => for {
+      case GET -> Root / "stats" => for {
         currentState       <- ctx.state.get
         rawEvents          = currentState.events
 //        events             = Events.filterEvents(events = currentState.events)
@@ -135,9 +135,10 @@ object StatsController {
           "maxAvailableResources" -> currentState.maxAR.asJson,
           "serviceTimes" -> serviceTimeByNode.asJson,
           "replicationStrategy" -> ctx.config.dataReplicationStrategy.asJson,
-          "monitoring"-> currentState.monitoringEx.asJson
+          "monitoring"-> currentState.monitoringEx.asJson,
+          "apiVersion" -> ctx.config.apiVersion.asJson
         )
-        response <- Ok(stats.asJson)
+        response <- Ok(stats)
       } yield response
     }
 

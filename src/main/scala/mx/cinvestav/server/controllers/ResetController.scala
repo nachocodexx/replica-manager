@@ -15,7 +15,7 @@ object ResetController {
 
 
   def apply()(implicit ctx:NodeContext):HttpRoutes[IO]= HttpRoutes.of[IO]{
-    case POST@req -> Root =>
+    case POST@req -> Root / "reset" =>
       for {
         _   <- ctx.logger.debug("RESET")
         lb           <- Helpers.initLoadBalancerV3(balancerToken = ctx.config.uploadLoadBalancer)

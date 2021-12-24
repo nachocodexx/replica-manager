@@ -25,7 +25,7 @@ import mx.cinvestav.Declarations.{NodeContext, ObjectId,CreateNodeResponse}
 import mx.cinvestav.Declarations.Implicits._
 import mx.cinvestav.commons.balancer.v2.Balancer
 import mx.cinvestav.commons.balancer.v3.{RoundRobin,PseudoRandom,Balancer=>BalancerV3,TwoChoices}
-import mx.cinvestav.server.HttpServer.{PushResponse, ReplicationResponse}
+import mx.cinvestav.Declarations.{PushResponse, ReplicationResponse}
 //import mx.cinvestav.commons.t
 //
 import org.http4s.client.Client

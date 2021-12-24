@@ -8,7 +8,8 @@ trait NodeInfo {
     def hostname: String
     def port: Int
     def apiVersion: String
-  }
+}
+
 case class SystemReplication(
                               protocol:String="http",
                               ip:String="127.0.0.1",
@@ -52,6 +53,7 @@ case class DefaultConfig(
                           returnHostname:Boolean,
                           cloudEnabled:Boolean,
                           inMemory:Boolean,
-                          experimentId:String
+                          experimentId:String,
+                          apiVersion:Int
                           //                          rabbitmq: RabbitMQClusterConfig
                         )

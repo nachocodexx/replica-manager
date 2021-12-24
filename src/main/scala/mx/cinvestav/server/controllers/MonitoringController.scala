@@ -13,7 +13,7 @@ import org.typelevel.ci.CIString
 object MonitoringController {
 
   def apply()(implicit ctx:NodeContext)= HttpRoutes.of[IO]{
-    case req@POST -> Root / nodeId   => for {
+    case req@POST -> Root / "monitoring" / nodeId   => for {
       arrivalTime             <- IO.realTime.map(_.toMillis)
       arrivalTimeNanos        <- IO.monotonic.map(_.toNanos)
       headers       = req.headers

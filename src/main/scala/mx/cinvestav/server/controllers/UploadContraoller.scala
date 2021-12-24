@@ -12,7 +12,7 @@ import mx.cinvestav.Declarations.Implicits._
 import mx.cinvestav.Helpers
 import mx.cinvestav.commons.events.Uploaded
 import mx.cinvestav.events.Events
-import mx.cinvestav.server.HttpServer.PushResponse
+import mx.cinvestav.Declarations.PushResponse
 //
 import java.util.UUID
 //

@@ -71,13 +71,12 @@ object Main extends IOApp {
         .withDefaultSocketReuseAddress
         .resource.allocated
       sDownload          <- Semaphore[IO](1)
-      sReplication       <- Semaphore[IO](1)
-//      sysRepSema         <- Semaphore[IO](1)
-      signalRef          <- SignallingRef.of[IO,Boolean](false)
-      ctx                <- initContext(client)
-      _                  <- Helpers.replicationDaemon(sReplication,period = config.replicationDaemonDelayMillis milliseconds,signalRef)(ctx=ctx).startOn(threadPool).void
-      _                  <- Helpers.serviceReplicationDaemon(s=signalRef,period = config.serviceReplicationDaemonDelay milliseconds)(ctx=ctx).start.void
-      _                  <- HttpServer.run(sDownload)(ctx=ctx )
+//      sReplication       <- Semaphore[IO](1)
+//      signalRef          <- SignallingRef.of[IO,Boolean](false)
+      implicit0(ctx:NodeContext) <- initContext(client)
+//      _                  <- Helpers.replicationDaemon(sReplication,period = config.replicationDaemonDelayMillis milliseconds,signalRef)(ctx=ctx).startOn(threadPool).void
+//      _                  <- Helpers.serviceReplicationDaemon(s=signalRef,period = config.serviceReplicationDaemonDelay milliseconds)(ctx=ctx).start.void
+      _                  <- HttpServer(sDownload).run()
       _                  <- finalizer
     } yield (ExitCode.Success)
   }

@@ -23,7 +23,7 @@ object EventsControllers {
   def apply()(implicit ctx:NodeContext) = {
 //   object
     HttpRoutes.of[IO]{
-      case GET -> Root :? OptionalFiltered(filtered)  => for {
+      case GET -> Root / "events" :? OptionalFiltered(filtered)  => for {
         currentState <- ctx.state.get
         rawEvents    = currentState.events
         events       = filtered match {

@@ -84,6 +84,16 @@ object Declarations {
 
   case class User(id:String,bucketName:String)
 
+  case class PushResponse(
+                           nodeId:String,
+                           userId:String,
+                           guid:String,
+                           objectSize:Long,
+                           serviceTimeNanos:Long,
+                           timestamp:Long,
+                           level:Int
+                         )
+  case class ReplicationResponse(guid:String,replicas:List[String],milliSeconds:Long,timestamp:Long,rf:Int=1)
 //  case class NodeX(nodeId:String, ip:String, port:Int, metadata:Map[String,String]= Map.empty[String,String]){
 //    def httpUrl = s"http://$ip:$port"
 //  }

@@ -14,7 +14,7 @@ object PutController {
 
 
   def apply()(implicit ctx:NodeContext) = HttpRoutes.of[IO]{
-    case req@POST -> Root => for {
+    case req@POST -> Root / "put" => for {
       _ <- ctx.logger.debug("UPLOADED!!!")
       arrivalTime      <- IO.realTime.map(_.toMillis)
       arrivalTimeNanos <- IO.monotonic.map(_.toNanos)

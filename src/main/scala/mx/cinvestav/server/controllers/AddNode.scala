@@ -24,7 +24,7 @@ object AddNode {
 //  case class Payload(nodeId:String, ip:String, port:Int, metadata:Map[String,String])
 
   def apply()(implicit ctx:NodeContext) = HttpRoutes.of[IO]{
-    case req@POST  -> Root  => for {
+    case req@POST  -> Root / "add-node"  => for {
       arrivalTime      <- IO.realTime.map(_.toMillis)
       arrivalTimeNanos <- IO.monotonic.map(_.toNanos)
       currentState     <- ctx.state.get

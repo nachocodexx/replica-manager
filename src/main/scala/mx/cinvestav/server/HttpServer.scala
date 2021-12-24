@@ -35,54 +35,49 @@ import java.util.UUID
 import scala.concurrent.ExecutionContext.global
 //
 
-object HttpServer {
-//  ____________________________________________
-  case class PushResponse(
-                           nodeId:String,
-                           userId:String,
-                           guid:String,
-                           objectSize:Long,
-                           serviceTimeNanos:Long,
-                           timestamp:Long,
-                           level:Int
-                         )
-  case class ReplicationResponse(guid:String,replicas:List[String],milliSeconds:Long,timestamp:Long,rf:Int=1)
-//  ________________________
+class HttpServer(sDownload:Semaphore[IO])(implicit ctx:NodeContext) {
+  def apiBaseRouteName = s"/api/v${ctx.config.apiVersion}"
 
-//  def authMiddleware(implicit ctx:NodeContext):AuthMiddleware[IO,User] =
-//    AuthMiddleware(authUser=authUser)
+  def basicOpsRoutes = AuthMiddlewareX(ctx)(DownloadControllerV2(sDownload) <+> UploadControllerV2(sDownload))
 
-//  def authRoutes()(implicit ctx:NodeContext):AuthedRoutes[User,IO] =
-//    UploadContraoller() <+> DownloadController()
-//  <+> UploadControllerV2()
-//  <+> GetController()
+  def defaultRoutes =
+    UpdateConfig() <+> AddNode() <+> CORS(StatsController()) <+> CORS(EventsControllers())<+> CORS(SaveEventsController()) <+> ResetController() <+> PutController()<+>MonitoringController()
 
-  private def httpApp(sDownload:Semaphore[IO])(implicit ctx:NodeContext): Kleisli[IO, Request[IO],
-    Response[IO]] =
+  def httpApp: Kleisli[IO, Request[IO], Response[IO]] =
     Router[IO](
-//      "/api/v6" ->  AuthMiddlewareX(ctx=ctx)(authRoutes()),
-      "/api/v6/update" -> UpdateConfig(),
-      "/api/v6/add-node" -> AddNode(),
-      "/api/v6/stats" -> CORS(StatsController()),
-      "/api/v6/events" -> CORS(EventsControllers()),
-      "/api/v6/events/all" -> CORS(SaveEventsController()),
-      "/api/v7/reset" -> ResetController(),
-      "/api/v7" -> AuthMiddlewareX(ctx)(DownloadControllerV2(sDownload) <+> UploadControllerV2(sDownload)),
-      "/api/v7/evicted" -> EvictedController(),
-      "/api/v7/put" -> PutController(),
-      "/api/v7/monitoring" -> MonitoringController(),
-//      "/api/v7"
+      s"$apiBaseRouteName"-> basicOpsRoutes,
+      s"$apiBaseRouteName" -> defaultRoutes
+//      "/api/v6/update" -> UpdateConfig(),
+//      "/api/v6/add-node" -> AddNode(),
+//      "/api/v6/stats" -> CORS(StatsController()),
+//      "/api/v6/events" -> CORS(EventsControllers()),
+//      "/api/v6/events/all" -> CORS(SaveEventsController()),
+//      "/api/v7/reset" -> ResetController(),
+//      "/api/v7" ->
+//      "/api/v7/evicted" -> EvictedController(),
+//      "/api/v7/put" -> PutController(),
+//      "/api/v7/monitoring" -> MonitoringController(),
+      //      "/api/v7"
     ).orNotFound
 
-  def run(sDownload:Semaphore[IO])(implicit ctx:NodeContext): IO[Unit] = for {
-    _ <- ctx.logger.debug(s"HTTP SERVER AT ${ctx.config.host}:${ctx.config.port}")
-    _ <- BlazeServerBuilder[IO](executionContext = global)
+
+  def run(): IO[Unit] = BlazeServerBuilder[IO](executionContext = global)
       .bindHttp(ctx.config.port,ctx.config.host)
-      .withHttpApp(httpApp = httpApp(sDownload))
+      .withHttpApp(httpApp = httpApp)
       .serve
       .compile
       .drain
-  } yield ()
+
+}
+
+object HttpServer {
+//  ____________________________________________
+
+  def apply(sDownload:Semaphore[IO])(implicit ctx:NodeContext) = new HttpServer(sDownload)
+//    for {
+//    _ <- ctx.logger.debug(s"HTTP SERVER AT ${ctx.config.host}:${ctx.config.port}")
+//    _ <-
+//  } yield ()
 
 
 }

@@ -21,7 +21,7 @@ import io.circe.syntax._
 object SaveEventsController {
 
   def apply()(implicit ctx:NodeContext) = HttpRoutes.of[IO]{
-    case GET -> Root => for {
+    case GET -> Root / "events/all" => for {
 
       currentState       <- ctx.state.get
       rawEvents          = currentState.events
