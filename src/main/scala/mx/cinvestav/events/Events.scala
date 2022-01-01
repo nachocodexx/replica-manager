@@ -37,6 +37,20 @@ object Events {
 
 
 //
+  import mx.cinvestav.commons.types.Monitoring.NodeInfo
+  case class CollectedNodesInfo(
+                        nodeId: String,
+                        poolId:String,
+                        infos:List[NodeInfo],
+                        timestamp: Long,
+                        monotonicTimestamp: Long = 0L,
+                        correlationId: String = UUID.randomUUID().toString,
+                        serialNumber: Long=0,
+                        eventType: String ="COLLECTED_NODES_INFO",
+                        eventId: String= UUID.randomUUID().toString,
+                        serviceTimeNanos: Long=0L,
+                      ) extends EventX
+
   case class HotObject(
                         serialNumber: Long,
                         nodeId: String,

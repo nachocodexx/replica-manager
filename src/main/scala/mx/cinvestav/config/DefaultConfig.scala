@@ -10,6 +10,9 @@ trait NodeInfo {
     def apiVersion: String
 }
 
+case class DataReplicationSystem(hostname:String, port:Int, apiVersion:Int){
+
+}
 case class SystemReplication(
                               protocol:String="http",
                               ip:String="127.0.0.1",
@@ -31,7 +34,7 @@ case class DefaultConfig(
                           maxRf:Int,
                           maxAr:Int,
                           nodeId:String,
-                          poolId:String,
+//                          poolId:String,
                           host:String,
                           systemReplication:SystemReplication,
                           serviceReplicationDaemon:Boolean,
@@ -46,14 +49,15 @@ case class DefaultConfig(
                           defaultCachePolicy:String,
                           defaultCachePort:Int,
                           hostLogPath:String,
-                          downloadMaxRetry:Int,
-                          downloadBaseDelayMs:Long,
+//                          downloadMaxRetry:Int,
+//                          downloadBaseDelayMs:Long,
                           dataReplicationStrategy:String="static",
                           dataReplicationIntervalMs:Long=10000,
                           returnHostname:Boolean,
                           cloudEnabled:Boolean,
-                          inMemory:Boolean,
+//                          inMemory:Boolean,
                           experimentId:String,
-                          apiVersion:Int
+                          apiVersion:Int,
+                          dataReplication:DataReplicationSystem
                           //                          rabbitmq: RabbitMQClusterConfig
                         )

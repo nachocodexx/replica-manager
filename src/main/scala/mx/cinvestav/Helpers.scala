@@ -135,7 +135,7 @@ object Helpers {
       systemRepResponse  <- if(nodesLen < currentState.maxAR && !signalValue) for {
         _                <- s.set(true)
         systemRepPayload   = Json.obj(
-          "poolId"->ctx.config.poolId.asJson,
+          "poolId"->ctx.config.nodeId.asJson,
           "cacheSize" -> ctx.config.defaultCacheSize.asJson,
           "policy" -> ctx.config.defaultCachePolicy.asJson,
           "basePort" -> ctx.config.defaultCachePort.asJson,

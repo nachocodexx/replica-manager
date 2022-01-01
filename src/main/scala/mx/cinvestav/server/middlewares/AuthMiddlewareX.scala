@@ -15,6 +15,8 @@ object AuthMiddlewareX {
   def authUser()(implicit ctx:NodeContext):Kleisli[OptionT[IO,*],Request[IO],User] =
     Kleisli{ req=> for {
       _          <- OptionT.liftF(IO.unit)
+      uri        = req.uri
+      _          <- OptionT.liftF(ctx.logger.debug(s"URI ${uri}"))
       headers    = req.headers
       maybeUserId     = headers.get(ci"User-Id").map(_.head).map(_.value)
       maybeBucketName = headers.get(ci"Bucket-Id").map(_.head).map(_.value)
