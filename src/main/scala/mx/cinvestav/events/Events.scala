@@ -3,6 +3,7 @@ package mx.cinvestav.events
 import cats.implicits._
 import cats.effect._
 import mx.cinvestav.commons.events.{Del, UpdatedNodePort}
+import mx.cinvestav.commons.types.Monitoring
 
 import java.util.UUID
 import scala.annotation.tailrec
@@ -38,6 +39,19 @@ object Events {
 
 //
   import mx.cinvestav.commons.types.Monitoring.NodeInfo
+  case class UpdatedNetworkCfg(
+                                nodeId: String,
+                                poolId:String,
+                                timestamp: Long,
+                                publicPort:Int,
+                                ipAddress:String,
+                                monotonicTimestamp: Long = 0L,
+                                correlationId: String = UUID.randomUUID().toString,
+                                serialNumber: Long=0,
+                                eventType: String ="UPDATED_PUBLIC_PORT",
+                                eventId: String= UUID.randomUUID().toString,
+                                serviceTimeNanos: Long=0L,
+                              ) extends EventX
   case class CollectedNodesInfo(
                         nodeId: String,
                         poolId:String,
@@ -113,8 +127,15 @@ object Events {
                             ) extends EventX
 
 
+//  onlyUpdatedPublicPort
+  def onlyUpdatedPublicPort(events:List[EventX]): List[EventX] = events.filter {
+      case _:UpdatedNetworkCfg => true
+      case _=> false
+    }
+  def getPublicPort(events:List[EventX],nodeId:String): Option[UpdatedNetworkCfg] = onlyUpdatedPublicPort(events=events)
+    .map(_.asInstanceOf[UpdatedNetworkCfg])
+    .find(_.nodeId == nodeId)
 //  Get interval downloads
-
   def getDownloadsByIntervalByObjectId(objectId:String)(period:FiniteDuration)(events:List[EventX]) = {
     val es = onlyGets(events=events).map(_.asInstanceOf[Get]).filter(_.objectId == objectId).map(_.asInstanceOf[EventX])
     Events.getDownloadsByInterval(period)(events=es).map(_.length)
@@ -143,6 +164,7 @@ object Events {
       case None => Nil
     }
   }
+
 //
   def getNodeMonitoringStats(events:List[EventX])= {
     val xs = events.filter{
@@ -284,8 +306,9 @@ object Events {
     guid:String,
     arMap:Map[String,NodeX],
     events:List[EventX],
-    monitoringEvents:List[EventX] = Nil,
-    monitoringEx:Map[String,EventX] = Map.empty[String,EventX]
+//    monitoringEvents:List[EventX] = Nil,
+    monitoringEx:List[Monitoring.NodeInfo] = Nil
+//    Map[String,EventX] = Map.empty[String,EventX]
   )(implicit ctx:NodeContext):Option[NodeX] = {
     if(arMap.size == 1) arMap.head._2.some
     else downloadBalancer match {
@@ -301,16 +324,25 @@ object Events {
         val nodeId = nodeWithReplicaCounter.toList.get(index).map(_._1).get
         arMap.get(nodeId)
       case "UF" =>
-        val ufs = monitoringEx.map{ case (str, x) => str -> x.asInstanceOf[MonitoringStats]}
-          .filter(x=>arMap.contains(x._1))
-//          .map(_._2.ufRAM)
-        None
+        if(monitoringEx.isEmpty) arMap.values.headOption
+        else {
+          val x = monitoringEx.filter{ x=>
+            arMap.contains(x.nodeId)
+          }.minBy(_.RAMUf)
+          val y = arMap.get(x.nodeId)
+          y
+        }
+//        None
+//        val ufs = monitoringEx.map{ case (str, x) => str -> x.asInstanceOf[MonitoringStats]}
+//          .filter(x=>arMap.contains(x._1))
+//        //          .map(_._2.ufRAM)
+//        None
 //        val ufs = Events.getNodeMonitoringStats(events= monitoringEvents).map{
 //          case (nodeId, value) =>nodeId -> value.getOrElse("JvmUfRAM","1").toDouble
 //        }.filter(x=>arMap.contains(x._1))
 ////        println(ufs)
-        val minUF = ufs.minBy(_._2.ufRAM)._1
-        arMap.get(minUF)
+//        val minUF = ufs.minBy(_._2.ufRAM)._1
+//        arMap.get(minUF)
       case "PSEUDO_RANDOM" =>
         val nodeIds =  arMap.keys.toList
         val randomIndex = new Random().nextInt(arMap.size)
@@ -485,17 +517,6 @@ object Events {
       .distinct
       .sorted
 //
-  def getHitCounterByNode(events:List[EventX]): Map[String, Map[String, Int]] = {
-    val objectsIds                = getObjectIds(events = events)
-    val downloadObjectInitCounter = objectsIds.map(x=> (x -> 0)).toMap
-    Events.onlyGets(events = events).map(_.asInstanceOf[Get]).map{ e=>
-      Map(e.nodeId -> Map(e.objectId -> 1)  )
-    }
-      .foldLeft(Map.empty[String,Map[String,Int]  ])(_ |+| _)
-      .map{
-        case (objectId, value) => (objectId, downloadObjectInitCounter|+|value )
-      }
-  }
 
   def getHitCounterByNodeV2(events:List[EventX], windowTime:Long=0): Map[String, Map[String, Int]] = {
     val objectsIds                = getObjectIds(events = events)
@@ -598,21 +619,32 @@ object Events {
     }
   }
 
+
+  def getHitCounterByNode(events:List[EventX]): Map[String, Map[String, Int]] = {
+    val objectsIds                = getObjectIds(events = events)
+    val downloadObjectInitCounter = objectsIds.map(x=> (x -> 0)).toMap
+    Events.onlyGets(events = events).map(_.asInstanceOf[Get]).map{ e=>
+      Map(e.nodeId -> Map(e.objectId -> 1)  )
+    }
+      .foldLeft(Map.empty[String,Map[String,Int]  ])(_ |+| _)
+      .map{
+        case (objectId, value) => (objectId, downloadObjectInitCounter|+|value )
+      }
+  }
   def generateMatrix(events:List[EventX]): DenseMatrix[Double] = {
     val hitCounter = ListMap(
       getHitCounterByNode(events = events).toList.sortBy(_._1):_*
     ).map{
       case (nodeId, counter) => nodeId-> ListMap(counter.toList.sortBy(_._1):_*)
     }
-//      .toMap
-//    println(s"HIT_COUNTER ${hitCounter}")
     val vectors = hitCounter
-  .toList.sortBy(_._1)
-  .map{
-      case (nodeId, objectDownloadCounter) =>
-        val values = objectDownloadCounter.values.toArray.map(_.toDouble)
-        val vec = DenseVector(values:_*)
-        vec
+      .toList
+      .sortBy(_._1)
+      .map{
+        case (nodeId, objectDownloadCounter) =>
+          val values = objectDownloadCounter.values.toArray.map(_.toDouble)
+          val vec = DenseVector(values:_*)
+          vec
     }.toList
     DenseMatrix(vectors.map(_.toArray):_*)
   }
@@ -660,6 +692,7 @@ object Events {
   }
 
   def getObjectIds(events:List[EventX]): List[String] = Events.onlyPutos(events = events).map(_.asInstanceOf[Put]).map(_.objectId).distinct
+
   def getDumbObject(events:List[EventX]): List[DumbObject] = Events.onlyPutos(events = events)
     .map(_.asInstanceOf[Put]).map{
     x=> DumbObject(x.objectId,x.objectSize)

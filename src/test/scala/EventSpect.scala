@@ -104,7 +104,8 @@ class EventSpect extends munit .CatsEffectSuite {
     counter = 0,
     timestamp = 0,
     //      eventType = ???,
-    serviceTimeNanos = 0
+    serviceTimeNanos = 0,
+    userId = ""
   )
 
   val rawEvents = List(

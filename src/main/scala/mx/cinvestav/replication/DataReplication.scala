@@ -171,21 +171,17 @@ object DataReplication {
       hotData_                 = orderedDumbObjects.filter(x=>hotData.contains(x.objectId))
     } yield hotData_
   }
-
-
   def selectHotDataV3(events:List[EventX])(implicit ctx:NodeContext)= {
     val F       = Events.getDumbObject(events=events)
     val period  = ctx.config.dataReplicationIntervalMs milliseconds
-    val  x = F.map{ f =>
+    val  x      = F.map{ f =>
         val y = Events.getDownloadsByIntervalByObjectId(objectId = f.objectId)(period)(events=events)
       (f -> DataReplication.nextNumberOfAccess(y))
     }
-    println(x)
     x.filter(_._2>0).maxByOption(_._2) match {
       case Some(value) => value._1::Nil
       case None => Nil
     }
-//    x.toLi.toList.pure[IO]
   }
   def selectHotDataV2(events:List[EventX])(implicit ctx:NodeContext): IO[List[DumbObject]] = {
     for{
@@ -245,6 +241,7 @@ object DataReplication {
 
 //    val objectIdEvents = Events.on
   }
+
   def runEffects(events:List[EventX],
                  dumbObject: DumbObject,
                  selectedNode:NodeX,
@@ -258,7 +255,6 @@ object DataReplication {
 //    pullFrom   = pullNodeX.httpUrl+s"/api/v6/download/$objectId"
     pullFrom   = if(ctx.config.returnHostname) s"http://${pullNodeX.nodeId}:6666/api/v6/download/$objectId" else pullNodeX.httpUrl+s"/api/v6/download/$objectId"
     unsafeUri  = if(ctx.config.returnHostname)s"http://${selectedNode.nodeId}:6666/pull" else s"${selectedNode.httpUrl+"/pull"}"
-//    unsafeUri  = s"${selectedNode.httpUrl+"/pull"}"
     //
     req      = Request[IO](
       method = Method.POST,

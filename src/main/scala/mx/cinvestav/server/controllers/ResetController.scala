@@ -17,7 +17,7 @@ object ResetController {
   def apply()(implicit ctx:NodeContext):HttpRoutes[IO]= HttpRoutes.of[IO]{
     case POST@req -> Root / "reset" =>
       for {
-        _   <- ctx.logger.debug("RESET")
+        _            <- ctx.logger.debug("RESET")
         lb           <- Helpers.initLoadBalancerV3(balancerToken = ctx.config.uploadLoadBalancer)
         currentState <- ctx.state.get
         nodes        = Events.getAllNodeXs(events=currentState.events)
@@ -25,6 +25,8 @@ object ResetController {
           s.copy(
             events =  currentState.events.filter{
               case _:events.AddedNode => true
+              case _:events.RemovedNode => true
+              case _:Events.UpdatedNetworkCfg => true
               case _=>false
             },
             uploadBalancer = lb.some,
@@ -33,14 +35,20 @@ object ResetController {
           )
 
         }
+        apiVersion = s"v${ctx.config.apiVersion}"
+        x   <- nodes.map{node=>
 
-        x <- nodes.map{node=>
-          val uri = if(ctx.config.returnHostname) s"http://${node.nodeId}:${node.port}/api/v6/reset" else s"http://${node.ip}:${node.port}/api/v6/reset"
+          val uri = if(ctx.config.returnHostname) s"http://${node.nodeId}:${node.port}/api/$apiVersion/reset"
+            else s"http://${node.ip}:${node.port}/api/$apiVersion/reset"
+
           Request[IO](
             method = Method.POST,
             uri    = Uri.unsafeFromString(uri)
           )
+
         }.traverse{req=>ctx.client.status(req)}
+        _   <- ctx.config.systemReplication.reset().start
+        _   <- ctx.config.dataReplication.reset().start
         _   <- ctx.logger.debug(x.toString)
         res <- NoContent()
       } yield res

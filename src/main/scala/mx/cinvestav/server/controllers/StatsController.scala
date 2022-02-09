@@ -27,14 +27,13 @@ object StatsController {
       case GET -> Root / "stats" => for {
         currentState       <- ctx.state.get
         rawEvents          = currentState.events
-//        events             = Events.filterEvents(events = currentState.events)
-//        events             = Events.orderAndFilterEvents(events = rawEvents)
         events             = Events.orderAndFilterEventsMonotonicV2(events = rawEvents)
-//          Events.filterEvents(events = currentState.events)
         ars                = Events.getAllNodeXs(events=events)
           .map {
             node =>
-              val ops = Events.getOperationsByNodeId(nodeId = node.nodeId, events = rawEvents)
+              val nodeId = node.nodeId
+              val ops        = Events.getOperationsByNodeId(nodeId = nodeId, events = rawEvents)
+              val publicPort = Events.getPublicPort(events= events,nodeId).map(_.publicPort).getOrElse(6666)
               val gets = ops.count(_.eventType == "GET")
               val puts = ops.count(_.eventType == "PUT")
               node.copy(
@@ -42,18 +41,14 @@ object StatsController {
                   "TOTAL_REQUESTS" -> (gets + puts).toString,
                   "DOWNLOAD_REQUESTS" -> gets.toString,
                   "UPLOAD_REQUESTS" -> puts.toString,
+                  "PUBLIC_PORT" -> publicPort.toString
                 )
               )
           }
 
-
-
         distributionSchema = Events.generateDistributionSchema(events = events)
         objectsIds         = Events.getObjectIds(events = events)
-        hitCounter         = Events.getHitCounterByNode(events = events).map{
-            case (nodeId, counter) =>
-              nodeId -> counter.filter(_._2>0)
-          }
+        hitCounter         = Events.getHitCounterByNode(events = events)
         hitRatioInfo       = Events.getGlobalHitRatio(events=events)
         tempMatrix         = Events.generateTemperatureMatrixV2(events = events,windowTime = 0)
         tempMatrix0         = Events.generateTemperatureMatrixV3(events = events,windowTime = 0)

@@ -1,6 +1,12 @@
 package mx.cinvestav.config
 
-import org.http4s.Uri
+import cats.implicits._
+import cats.effect._
+import mx.cinvestav.Declarations.NodeContext
+import org.http4s._
+//import org.http4s.Me
+//import org.http4s.blaze.http.http2.PseudoHeaders.Method
+import org.http4s.{Request, Uri}
 
 trait NodeInfo {
     def protocol: String
@@ -11,22 +17,37 @@ trait NodeInfo {
 }
 
 case class DataReplicationSystem(hostname:String, port:Int, apiVersion:Int){
-
+  def url:String = s"http://$hostname:$port"
+  def apiUrl:String = s"${this.url}/api/$apiVersion"
+  def reset()(implicit ctx:NodeContext) = for {
+    _   <- IO.unit
+    req =  Request[IO](
+      method = Method.POST,
+      uri = Uri.unsafeFromString(s"$apiUrl/reset")
+    )
+    s   <- ctx.client.status(req)
+    _   <- ctx.logger.info(s"RESET_STATUS $s")
+  } yield ()
 }
-case class SystemReplication(
-                              protocol:String="http",
-                              ip:String="127.0.0.1",
-                              hostname:String="localhost",
+case class SystemReplication(protocol:String="http", ip:String="127.0.0.1", hostname:String="localhost",
                               port:Int=3000,
-                              apiVersion:String="v6"
+                              apiVersion:String="v2"
                             ) extends NodeInfo{
 
   def url:String = s"$protocol://$hostname:$port"
   def apiUrl:String = s"${this.url}/api/$apiVersion"
   def createNodeStr:String = s"${this.apiUrl}/create/cache-node"
-  def createNodeUri:Uri = Uri.unsafeFromString(s"http://${hostname}:${port}/api/v6/create/cache-node")
-
-//  def createCacheNode
+  def createNodeUri:Uri = Uri.unsafeFromString(s"http://${hostname}:${port}/api/v2/create/cache-node")
+//
+  def reset()(implicit ctx:NodeContext) = for {
+    _   <- IO.unit
+    req =  Request[IO](
+      method = Method.POST,
+      uri = Uri.unsafeFromString(s"$apiUrl/reset")
+    )
+    s   <- ctx.client.status(req)
+    _   <- ctx.logger.info(s"RESET_STATUS $s")
+  } yield ()
 }
 
 case class DefaultConfig(
@@ -34,7 +55,6 @@ case class DefaultConfig(
                           maxRf:Int,
                           maxAr:Int,
                           nodeId:String,
-//                          poolId:String,
                           host:String,
                           systemReplication:SystemReplication,
                           serviceReplicationDaemon:Boolean,
@@ -49,15 +69,14 @@ case class DefaultConfig(
                           defaultCachePolicy:String,
                           defaultCachePort:Int,
                           hostLogPath:String,
-//                          downloadMaxRetry:Int,
-//                          downloadBaseDelayMs:Long,
                           dataReplicationStrategy:String="static",
                           dataReplicationIntervalMs:Long=10000,
                           returnHostname:Boolean,
                           cloudEnabled:Boolean,
-//                          inMemory:Boolean,
                           experimentId:String,
                           apiVersion:Int,
-                          dataReplication:DataReplicationSystem
+                          dataReplication:DataReplicationSystem,
+                          monitoringDelayMs:Int,
+                          usePublicPort:Boolean
                           //                          rabbitmq: RabbitMQClusterConfig
                         )

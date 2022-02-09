@@ -2,8 +2,12 @@ package mx.cinvestav
 import breeze.linalg._
 import breeze.stats.{mean, stddev}
 import cats.effect.std.Semaphore
+import fs2.Stream
 import fs2.concurrent.SignallingRef
+import mx.cinvestav.commons.events.AddedNode
+import mx.cinvestav.commons.types.Monitoring.NodeInfo
 import mx.cinvestav.events.Events.{MeasuredServiceTime, MonitoringStats}
+import mx.cinvestav.commons.Implicits._
 import mx.cinvestav.replication.DataReplication
 import retry.retryingOnFailuresAndAllErrors
 import retry.{RetryDetails, RetryPolicies}
@@ -46,6 +50,34 @@ import concurrent.duration._
 import language.postfixOps
 
 object Helpers {
+
+
+  def getNodesInfos(addedServices:List[AddedNode])(implicit ctx:NodeContext): IO[List[NodeInfo]] = {
+    for {
+      _                <- IO.unit
+      uris             = addedServices.map{x=>
+        val hostname   = x.ipAddress
+        val port       = x.port
+        val apiVersion = ctx.config.apiVersion
+        Uri.unsafeFromString(s"http://$hostname:$port/api/v$apiVersion/info")
+      }
+      requests = uris.map{ u=>Request[IO](
+        method = Method.GET,
+        uri    = u,
+        headers = Headers.empty
+      )}
+      responses <- Stream.emits(requests).flatMap(r=>
+
+        Stream.eval(ctx.logger.debug(s"GET_INFO ${r.uri}"))*>ctx.client.stream(r).evalMap{
+          _.as[NodeInfo].handleErrorWith(e=> ctx.logger.error(e.getMessage) *> NodeInfo.empty.pure[IO])
+        }.handleErrorWith{ e=>
+          ctx.logger.error(e.getMessage).pureS *> Stream.emit(NodeInfo.empty)
+        }
+
+      ).compile.to(List).onError{ e=> ctx.logger.error(e.getMessage)}
+      _ <- ctx.logger.debug("___________________________________")
+    } yield responses
+  }
 
 
   def getMonitoringStatsFromHeaders(nodeId:String,arrivalTime:Long)(headers:Headers) = {
@@ -263,6 +295,7 @@ object Helpers {
         counter = downloadsPerNode,
         timestamp = now+index,
         serviceTimeNanos = 1,
+        userId = ""
       )
 
     }

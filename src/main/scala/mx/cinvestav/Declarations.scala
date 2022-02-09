@@ -6,7 +6,7 @@ import cats.effect.std.Semaphore
 import cats.effect.{FiberIO, IO, Ref}
 import mx.cinvestav.commons.balancer.v2.Balancer
 import mx.cinvestav.commons.status.Status
-import mx.cinvestav.config.DefaultConfig
+import mx.cinvestav.config.{DefaultConfig, NodeInfo}
 import mx.cinvestav.commons.types.NodeX
 import mx.cinvestav.commons.balancer.v3.{Balancer => BalancerV3}
 import mx.cinvestav.commons.events.{AddedNode, Del, Downloaded, EventX, Evicted, Get, Missed, ObjectHashing, Push, Put, RemovedNode, Replicated, UpdatedNodePort, Uploaded, Pull => PullEvent, TransferredTemperature => SetDownloads}
@@ -25,6 +25,7 @@ import cats.effect.std.Queue
 
 import java.io.ByteArrayOutputStream
 import java.util.UUID
+import mx.cinvestav.commons.types.Monitoring
 
 object Declarations {
 
@@ -137,7 +138,8 @@ object Declarations {
                         replicationDaemonDelayMillis:Long,
                         replicationStrategy:String,
                         experimentId:String,
-                        replicationDaemonSingal:SignallingRef[IO,Boolean]
+                        replicationDaemonSingal:SignallingRef[IO,Boolean],
+                        infos:List[Monitoring.NodeInfo] = Nil
                         )
   case class NodeContext(
                             config: DefaultConfig,
