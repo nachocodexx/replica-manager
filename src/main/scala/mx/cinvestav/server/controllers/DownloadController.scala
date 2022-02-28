@@ -49,7 +49,7 @@ object DownloadController {
             subsetNodes          = locations.traverse(arMap.get).get.toNel.get
             maybeSelectedNode    = if(subsetNodes.length ==1) subsetNodes.head.some
             else Events.balanceByReplica(currentState.downloadBalancerToken,objectSize = objectSize)(
-                          guid = guid.toString,
+                          objectId = guid.toString,
                           arMap = subsetNodes.map(x=>x.nodeId->x).toList.toMap,
                           events=events)
             _                    <- ctx.logger.debug(s"SELECTED_NODE ${maybeSelectedNode.map(_.nodeId)}")
@@ -118,7 +118,7 @@ object DownloadController {
             maybeSelectedNode            <- if(nodes.length==1) nodes.headOption.pure[IO]
             else if(nodesWithAvailablePages.isEmpty)  for{
               _                  <- ctx.logger.debug("ALL NODES ARE FULL - SELECT A NODE RANDOMLY")
-              maybeSelectedNode  = Events.balanceByReplica(downloadBalancer = "PSEUDO_RANDOM")(guid= guid.toString,arMap = arMap,events=events)
+              maybeSelectedNode  = Events.balanceByReplica(downloadBalancer = "PSEUDO_RANDOM")(objectId= guid.toString,arMap = arMap,events=events)
 //              _                 <- if( (nodes.length < currentState.maxAR) && ctx.config.serviceReplicationDaemon)
 //                _ <- if(currentState.serviceReplicationDaemon) Helpers.createNode().start.void else IO.unit
 //              else IO.unit

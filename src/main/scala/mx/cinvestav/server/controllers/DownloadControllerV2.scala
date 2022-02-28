@@ -86,7 +86,7 @@ object DownloadControllerV2 {
       maybeSelectedNode     = if(subsetNodes.length ==1) subsetNodes.head.some else Events.balanceByReplica(
         downloadBalancerToken,
         objectSize = objectSize)(
-        guid = objectId,
+        objectId = objectId,
         arMap = subsetNodes.map(x=>x.nodeId->x).toList.toMap,
         events=events,
         infos = infos
@@ -130,7 +130,7 @@ object DownloadControllerV2 {
           maybeSelectedNode       <- if(nodes.length==1) nodes.headOption.pure[IO]
           else if(nodesWithAvailablePages.isEmpty)  for{
             _                  <- ctx.logger.debug("ALL NODES ARE FULL - SELECT A NODE RANDOMLY")
-            maybeSelectedNode  = Events.balanceByReplica(downloadBalancer = "PSEUDO_RANDOM")(guid= objectId,arMap = arMap,events=events, infos = infos)
+            maybeSelectedNode  = Events.balanceByReplica(downloadBalancer = "PSEUDO_RANDOM")(objectId= objectId,arMap = arMap,events=events, infos = infos)
           } yield maybeSelectedNode
           else nodesWithAvailablePages.maxByOption(_.availableCacheSize).pure[IO]
 //        _________________________________________________________________________

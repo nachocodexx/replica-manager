@@ -304,22 +304,22 @@ object Events {
   def balanceByReplica(
                         downloadBalancer:String="ROUND_ROBIN",
                         objectSize:Long=0)(
-    guid:String,
-    arMap:Map[String,NodeX],
-    events:List[EventX],
-    infos:List[Monitoring.NodeInfo] = Nil
+                        objectId:String,
+                        arMap:Map[String,NodeX],
+                        events:List[EventX],
+                        infos:List[Monitoring.NodeInfo] = Nil
   )(implicit ctx:NodeContext):Option[NodeX] = {
     import mx.cinvestav.commons.balancer.{nondeterministic,deterministic}
     if(arMap.size == 1) arMap.head._2.some
     else downloadBalancer match {
       case "LEAST_CONNECTIONS" =>
-        val nodeWithReplicaCounter = getReplicaCounter(guid,events,arMap)
+        val nodeWithReplicaCounter = getReplicaCounter(objectId,events,arMap)
         nodeWithReplicaCounter.minByOption(_._2).flatMap{
           case (nodeId, _) => arMap.get(nodeId)
         }
       case "ROUND_ROBIN" =>
         val nodeIds = NonEmptyList.fromListUnsafe(arMap.keys.toList)
-        val counter = Events.onlyGets(events=events).map(_.asInstanceOf[Get]).groupBy(_.nodeId).map{
+        val counter = Events.onlyGets(events=events).map(_.asInstanceOf[Get]).filter(_.objectId==objectId).groupBy(_.nodeId).map{
             case (nodeId,xs)=>nodeId -> xs.length
           }
         val defaultCounter:Map[String,Int] = nodeIds.toList.map(x=>x->0).toMap
@@ -370,7 +370,7 @@ object Events {
 //        val randomNodeId = nodeIds(randomIndex)
 //        arMap.get(randomNodeId)
       case _ =>
-        val nodeWithReplicaCounter = getReplicaCounter(guid,events,arMap)
+        val nodeWithReplicaCounter = getReplicaCounter(objectId,events,arMap)
         nodeWithReplicaCounter.minByOption(_._2).flatMap{
           case (nodeId, _) => arMap.get(nodeId)
         }
