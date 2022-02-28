@@ -41,29 +41,27 @@ object Main extends IOApp {
 //
   def initContext(client:Client[IO]): IO[NodeContext] = for {
 //
+    initTime        <- 0.pure[IO]
+//      IO.monotonic.map(_.toNanos)
     _               <- Logger[IO].debug(s"CACHE_POOL[${config.nodeId}]")
     signalRef       <- SignallingRef[IO,Boolean](false)
     systemSemaphore <- Semaphore[IO](1)
     _initState      = NodeState(
       status   = commons.status.Up,
       ip       = InetAddress.getLocalHost.getHostAddress,
-//      s        = s,
       downloadBalancerToken = config.downloadLoadBalancer,
-//      systemRepSignal = systemRepSignal,
-      serviceReplicationThreshold = config.serviceReplicationThreshold,
-      maxAR = config.maxAr,
-      maxRF = config.maxRf,
-      serviceReplicationDaemon = config.serviceReplicationDaemon,
-      balanceTemperature = config.balanceTemperature,
-      replicationDaemon = config.replicationDaemon,
-      replicationDaemonDelayMillis = config.replicationDaemonDelayMillis,
       systemSemaphore = systemSemaphore,
-      experimentId = config.experimentId,
-      replicationStrategy = config.dataReplicationStrategy,
       replicationDaemonSingal = signalRef
     )
     state           <- IO.ref(_initState)
-    ctx             = NodeContext(config=config,logger=unsafeLogger,state=state,errorLogger = unsafeErrorLogger,client=client)
+    ctx             = NodeContext(
+      config=config,
+      logger=unsafeLogger,
+      state=state,
+      errorLogger = unsafeErrorLogger,
+      client=client,
+      initTime = initTime
+    )
 //
   } yield ctx
 

@@ -18,7 +18,7 @@ trait NodeInfo {
 
 case class DataReplicationSystem(hostname:String, port:Int, apiVersion:Int){
   def url:String = s"http://$hostname:$port"
-  def apiUrl:String = s"${this.url}/api/$apiVersion"
+  def apiUrl:String = s"${this.url}/api/v$apiVersion"
   def reset()(implicit ctx:NodeContext) = for {
     _   <- IO.unit
     req =  Request[IO](
@@ -52,31 +52,36 @@ case class SystemReplication(protocol:String="http", ip:String="127.0.0.1", host
 
 case class DefaultConfig(
                           port:Int,
-                          maxRf:Int,
-                          maxAr:Int,
+//                          maxRf:Int,
+//                          maxAr:Int,
                           nodeId:String,
                           host:String,
                           systemReplication:SystemReplication,
-                          serviceReplicationDaemon:Boolean,
-                          serviceReplicationThreshold:Double,
-                          serviceReplicationDaemonDelay:Long,
-                          replicationDaemon:Boolean,
-                          replicationDaemonDelayMillis:Long,
-                          balanceTemperature:Boolean,
-                          uploadLoadBalancer:String="UF",
-                          downloadLoadBalancer:String="LEAST_DOWNLOADS",
-                          defaultCacheSize:Int,
-                          defaultCachePolicy:String,
-                          defaultCachePort:Int,
-                          hostLogPath:String,
-                          dataReplicationStrategy:String="static",
-                          dataReplicationIntervalMs:Long=10000,
+//                          serviceReplicationDaemon:Boolean,
+//                          serviceReplicationThreshold:Double,
+//                          serviceReplicationDaemonDelay:Long,
+//                          replicationDaemon:Boolean,
+//                          replicationDaemonDelayMillis:Long,
+//                          balanceTemperature:Boolean,
+                          uploadLoadBalancer:String,
+//                          ="UF",
+                          downloadLoadBalancer:String,
+//                          "LEAST_DOWNLOADS",
+//                          defaultCacheSize:Int,
+//                          defaultCachePolicy:String,
+//                          defaultCachePort:Int,
+//                          hostLogPath:String,
+//                          dataReplicationStrategy:String="static",
+//                          dataReplicationIntervalMs:Long=10000,
                           returnHostname:Boolean,
                           cloudEnabled:Boolean,
-                          experimentId:String,
+                          hasNextPool:Boolean,
                           apiVersion:Int,
                           dataReplication:DataReplicationSystem,
                           monitoringDelayMs:Int,
-                          usePublicPort:Boolean
+                          usePublicPort:Boolean,
+                          maxConnections:Int,
+                          bufferSize:Int,
+                          responseHeaderTimeoutMs:Long
                           //                          rabbitmq: RabbitMQClusterConfig
                         )

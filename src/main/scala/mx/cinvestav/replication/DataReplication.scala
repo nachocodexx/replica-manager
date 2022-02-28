@@ -44,7 +44,8 @@ object DataReplication {
           availableNodesToReplicate =  filteredARByCacheSize.map(_.nodeId).toSet.diff(replicaNodes.toSet)
             .toList
             .map(arMap)
-          isLowerThanMaxRF  = (numberOfNodes - availableNodesToReplicate.length) < currentState.maxRF
+          maxRF = 3
+          isLowerThanMaxRF  = (numberOfNodes - availableNodesToReplicate.length) < maxRF
           res =  if(isLowerThanMaxRF) availableNodesToReplicate.some
           else Option.empty[List[NodeX]]
         } yield res
@@ -58,7 +59,8 @@ object DataReplication {
     for {
       currentState       <- ctx.state.get
       maybeLastMonotonic = events.maxByOption(_.monotonicTimestamp).map(_.monotonicTimestamp)
-      tenSecondsInNanos  = (ctx.config.dataReplicationIntervalMs milliseconds).toNanos
+      tenSecondsInNanos  = 0L
+//        (ctx.config.dataReplicationIntervalMs milliseconds).toNanos
       windowTime         = maybeLastMonotonic.map(_ - tenSecondsInNanos).getOrElse(0L)
 //      newEvents          = events.filter(_.monotonicTimestamp >  windowTime)
       matrix             = Events.generateMatrixV2(events=events,windowTime = windowTime)
@@ -90,8 +92,9 @@ object DataReplication {
                    _                   <- IO.unit
 //                 GET NUMBER OF HOT
                    distributionSchema = Events.generateDistributionSchema(events=events).map(x=>x._1->x._2.length)
+                   maxRF = 3
                    res <- distributionSchema.get(hotObject.objectId) match {
-                     case Some(currentReplicationFactor) => if(currentReplicationFactor >= currentState.maxRF) List.empty[DumbObject].pure[IO]
+                     case Some(currentReplicationFactor) => if(currentReplicationFactor >= maxRF) List.empty[DumbObject].pure[IO]
                      else {
                        for {
                          _ <- IO.unit
@@ -173,7 +176,8 @@ object DataReplication {
   }
   def selectHotDataV3(events:List[EventX])(implicit ctx:NodeContext)= {
     val F       = Events.getDumbObject(events=events)
-    val period  = ctx.config.dataReplicationIntervalMs milliseconds
+    val period  =  1000 milliseconds
+//      ctx.config.dataReplicationIntervalMs milliseconds
     val  x      = F.map{ f =>
         val y = Events.getDownloadsByIntervalByObjectId(objectId = f.objectId)(period)(events=events)
       (f -> DataReplication.nextNumberOfAccess(y))
@@ -300,7 +304,8 @@ object DataReplication {
           // ___________________________________________________________________
           replicationServiceTimeNano <- IO.monotonic.map(_.toNanos).map(_ - pullEndAtNanos)
           //                              BALANCE TEMPERATURE
-          balanceTemperatureEvents <- if(ctx.config.balanceTemperature) {
+          balanceTemp = false
+          balanceTemperatureEvents <- if(balanceTemp) {
             for {
               _ <- IO.unit
               downloads        = Events.getDownloadsByObjectId(objectId = objectId,events = events)
@@ -381,7 +386,7 @@ object DataReplication {
           //        GET CURRENT REPLICAS
           filteredDistributionSchema = distributionSchema
             .filter{ case (objectId, value) => hotData.exists(x => x.objectId == objectId)}
-            .filter(_._2.length < currentState.maxRF)
+//            .filter(_._2.length < currentState.maxRF)
           //              _____________________________________________________________________________-
           //            OBJECT AND THE AVAILABLE NODES TO REPLICATE
           availableNodesToReplicateMap = filteredDistributionSchema.map{

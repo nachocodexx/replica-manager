@@ -1,5 +1,6 @@
 package mx.cinvestav.events
 
+import cats.data.NonEmptyList
 import cats.implicits._
 import cats.effect._
 import mx.cinvestav.commons.events.{Del, UpdatedNodePort}
@@ -306,10 +307,9 @@ object Events {
     guid:String,
     arMap:Map[String,NodeX],
     events:List[EventX],
-//    monitoringEvents:List[EventX] = Nil,
-    monitoringEx:List[Monitoring.NodeInfo] = Nil
-//    Map[String,EventX] = Map.empty[String,EventX]
+    infos:List[Monitoring.NodeInfo] = Nil
   )(implicit ctx:NodeContext):Option[NodeX] = {
+    import mx.cinvestav.commons.balancer.{nondeterministic,deterministic}
     if(arMap.size == 1) arMap.head._2.some
     else downloadBalancer match {
       case "LEAST_CONNECTIONS" =>
@@ -318,36 +318,57 @@ object Events {
           case (nodeId, _) => arMap.get(nodeId)
         }
       case "ROUND_ROBIN" =>
-        val nodeWithReplicaCounter = getReplicaCounter(guid,events,arMap)
-        val totalOfReqs = nodeWithReplicaCounter.values.sum
-        val index = totalOfReqs % nodeWithReplicaCounter.size
-        val nodeId = nodeWithReplicaCounter.toList.get(index).map(_._1).get
-        arMap.get(nodeId)
-      case "UF" =>
-        if(monitoringEx.isEmpty) arMap.values.headOption
-        else {
-          val x = monitoringEx.filter{ x=>
-            arMap.contains(x.nodeId)
-          }.minBy(_.RAMUf)
-          val y = arMap.get(x.nodeId)
-          y
-        }
-//        None
-//        val ufs = monitoringEx.map{ case (str, x) => str -> x.asInstanceOf[MonitoringStats]}
-//          .filter(x=>arMap.contains(x._1))
-//        //          .map(_._2.ufRAM)
-//        None
-//        val ufs = Events.getNodeMonitoringStats(events= monitoringEvents).map{
-//          case (nodeId, value) =>nodeId -> value.getOrElse("JvmUfRAM","1").toDouble
-//        }.filter(x=>arMap.contains(x._1))
-////        println(ufs)
-//        val minUF = ufs.minBy(_._2.ufRAM)._1
-//        arMap.get(minUF)
+        val nodeIds = NonEmptyList.fromListUnsafe(arMap.keys.toList)
+        val counter = Events.onlyGets(events=events).map(_.asInstanceOf[Get]).groupBy(_.nodeId).map{
+            case (nodeId,xs)=>nodeId -> xs.length
+          }
+        val defaultCounter:Map[String,Int] = nodeIds.toList.map(x=>x->0).toMap
+        val selectedNodeId = deterministic.RoundRobin(nodeIds = NonEmptyList.fromListUnsafe(arMap.keys.toList)  )
+          .balanceWith(
+            nodeIds = nodeIds.sorted,
+            counter = counter |+| defaultCounter
+          )
+        arMap.get(selectedNodeId)
+//        val nodeWithReplicaCounter = getReplicaCounter(guid,events,arMap)
+//        val totalOfReqs = nodeWithReplicaCounter.values.sum
+//        val index = totalOfReqs % nodeWithReplicaCounter.size
+//        val nodeId = nodeWithReplicaCounter.toList.get(index).map(_._1).get
+//        arMap.get(nodeId)
+      case "SORTING_UF" =>
+        val filteredInfos = infos.filter(x=>arMap.keys.toList.contains(x.nodeId))
+        val selectedNodeId = nondeterministic
+          .SortingUF()
+          .balance(
+            infos = NonEmptyList.fromListUnsafe(filteredInfos),
+            objectSize = objectSize,
+            takeN = 1,
+            mapTotalFn = _.RAMInfo.total,
+            mapUsedFn = _.RAMInfo.used
+          )
+
+        selectedNodeId.headOption.flatMap(arMap.get)
+//        arMap.get(selectedNodeId.head)
+      case "TWO_CHOICES" =>
+        val filteredInfos = infos.filter(x=>arMap.keys.toList.contains(x.nodeId))
+        val selectedNodeId = nondeterministic
+          .TwoChoices(psrnd = deterministic.PseudoRandom(nodeIds = NonEmptyList.fromListUnsafe(arMap.keys.toList)))
+          .balance(info = NonEmptyList.fromListUnsafe(filteredInfos),
+            objectSize = objectSize,
+            mapTotalFn = _.RAMInfo.total,
+            mapUsedFn = _.RAMInfo.used
+          )
+        arMap.get(selectedNodeId)
+//
       case "PSEUDO_RANDOM" =>
-        val nodeIds =  arMap.keys.toList
-        val randomIndex = new Random().nextInt(arMap.size)
-        val randomNodeId = nodeIds(randomIndex)
-        arMap.get(randomNodeId)
+        val nodeIds = NonEmptyList.fromListUnsafe(arMap.keys.toList)
+        val selectedNodeId = deterministic.PseudoRandom(
+          nodeIds = nodeIds.sorted
+        ).balance
+        arMap.get(selectedNodeId)
+//        val nodeIds =  arMap.keys.toList
+//        val randomIndex = new Random().nextInt(arMap.size)
+//        val randomNodeId = nodeIds(randomIndex)
+//        arMap.get(randomNodeId)
       case _ =>
         val nodeWithReplicaCounter = getReplicaCounter(guid,events,arMap)
         nodeWithReplicaCounter.minByOption(_._2).flatMap{
@@ -497,6 +518,23 @@ object Events {
     case _ => false
   }
 
+  def onlyPutsAndGets(events:List[EventX])  = events.filter{
+      case _:Put => true
+      case _:Get => true
+      case _ => false
+    }
+  def getLastOperation(events:List[EventX]) = onlyPutsAndGets(events=events).sortBy(_.monotonicTimestamp).lastOption
+  def getOperationCounter(events:List[EventX]) = onlyPutsAndGets(events=events).length
+
+
+  def getLastWaitingTime(events:List[EventX]): Long = {
+    val lastOp = getLastOperation(events=events)
+    lastOp match {
+      case Some(p:Put) => p.waitingTime
+      case Some(g:Get) => g.waitingTime
+      case _ => 0L
+    }
+  }
   def onlyPutos(events:List[EventX]): List[EventX] = events.filter{
       case up:Put => true
       case _ => false

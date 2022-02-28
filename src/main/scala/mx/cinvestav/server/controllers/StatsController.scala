@@ -102,11 +102,11 @@ object StatsController {
 //        _ <- ctx.logger.debug(arsJson.toString)
         serviceTimeByNode  = Events.getAvgServiceTimeByNode(events=events)
         stats              = Map(
-          "nodeId" -> ctx.config.nodeId.asJson,
-          "replicationDaemon" -> currentState.replicationDaemon.asJson,
-          "replicationDaemonDelay" -> currentState.replicationDaemonDelayMillis.asJson,
-          "serviceReplicationDaemon" -> currentState.serviceReplicationDaemon.asJson,
-          "serviceReplicationDaemonThreshold" -> currentState.serviceReplicationThreshold.asJson,
+          "nodeId"                   -> ctx.config.nodeId.asJson,
+//          "replicationDaemon"        -> currentState.replicationDaemon.asJson,
+//          "replicationDaemonDelay"   -> currentState.replicationDaemonDelayMillis.asJson,
+//          "serviceReplicationDaemon" -> currentState.serviceReplicationDaemon.asJson,
+//          "serviceReplicationDaemonThreshold" -> currentState.serviceReplicationThreshold.asJson,
           "port"  -> ctx.config.port.asJson,
           "ipAddress" -> currentState.ip.asJson,
           "availableResources" ->arsJson,
@@ -126,10 +126,10 @@ object StatsController {
             "download" -> currentState.downloadBalancerToken.asJson,
             "upload" -> currentState.uploadBalancer.map(_.token).getOrElse(ctx.config.uploadLoadBalancer).asJson
           ),
-          "maxReplicationFactor" -> currentState.maxRF.asJson,
-          "maxAvailableResources" -> currentState.maxAR.asJson,
+//          "maxReplicationFactor" -> currentState.maxRF.asJson,
+//          "maxAvailableResources" -> currentState.maxAR.asJson,
           "serviceTimes" -> serviceTimeByNode.asJson,
-          "replicationStrategy" -> ctx.config.dataReplicationStrategy.asJson,
+//          "replicationStrategy" -> ctx.config.dataReplicationStrategy.asJson,
           "monitoring"-> currentState.monitoringEx.asJson,
           "apiVersion" -> ctx.config.apiVersion.asJson
         )

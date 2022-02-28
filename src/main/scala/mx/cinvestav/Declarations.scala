@@ -10,7 +10,7 @@ import mx.cinvestav.config.{DefaultConfig, NodeInfo}
 import mx.cinvestav.commons.types.NodeX
 import mx.cinvestav.commons.balancer.v3.{Balancer => BalancerV3}
 import mx.cinvestav.commons.events.{AddedNode, Del, Downloaded, EventX, Evicted, Get, Missed, ObjectHashing, Push, Put, RemovedNode, Replicated, UpdatedNodePort, Uploaded, Pull => PullEvent, TransferredTemperature => SetDownloads}
-import mx.cinvestav.events.Events.{GetInProgress, HotObject, MeasuredServiceTime, MonitoringStats}
+import mx.cinvestav.events.Events.{GetInProgress, HotObject, MeasuredServiceTime, MonitoringStats, UpdatedNetworkCfg}
 import org.http4s.blaze.client.BlazeClientBuilder
 import org.http4s.client.Client
 //
@@ -55,6 +55,7 @@ object Declarations {
           case "MEASURED_SERVICE_TIME" => hCursor.as[MeasuredServiceTime]
           case "HOT_OBJECT" => hCursor.as[HotObject]
           case "MONITORING_STATS" => hCursor.as[MonitoringStats]
+          case "UPDATED_PUBLIC_PORT" => hCursor.as[UpdatedNetworkCfg]
         }
       } yield decoded
     }
@@ -78,6 +79,7 @@ object Declarations {
       case sd:MeasuredServiceTime => sd.asJson
       case hot:HotObject => hot.asJson
       case hot:MonitoringStats => hot.asJson
+      case hot:UpdatedNetworkCfg => hot.asJson
 
     }
   }
@@ -129,15 +131,15 @@ object Declarations {
                         monitoringEx:Map[String,EventX]= Map.empty[String,EventX],
 //                        systemRepSignal:SignallingRef[IO,Boolean],
                         systemSemaphore:Semaphore[IO],
-                        serviceReplicationDaemon:Boolean,
-                        serviceReplicationThreshold:Double,
-                        maxAR:Int,
-                        maxRF:Int,
-                        balanceTemperature:Boolean,
-                        replicationDaemon:Boolean,
-                        replicationDaemonDelayMillis:Long,
-                        replicationStrategy:String,
-                        experimentId:String,
+//                        serviceReplicationDaemon:Boolean,
+//                        serviceReplicationThreshold:Double,
+//                        maxAR:Int,
+//                        maxRF:Int,
+//                        balanceTemperature:Boolean,
+//                        replicationDaemon:Boolean,
+//                        replicationDaemonDelayMillis:Long,
+//                        replicationStrategy:String,
+//                        experimentId:String,
                         replicationDaemonSingal:SignallingRef[IO,Boolean],
                         infos:List[Monitoring.NodeInfo] = Nil
                         )
@@ -146,7 +148,8 @@ object Declarations {
                             logger: Logger[IO],
                             errorLogger: Logger[IO],
                             state:Ref[IO,NodeState],
-                            client:Client[IO]
+                            client:Client[IO],
+                            initTime:Long= 0L
 //                            rabbitMQContext:Option[RabbitMQContext]
                           )
 }

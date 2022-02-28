@@ -16,10 +16,10 @@ object AuthMiddlewareX {
     Kleisli{ req=> for {
       _          <- OptionT.liftF(IO.unit)
       uri        = req.uri
-      _          <- OptionT.liftF(ctx.logger.debug(s"URI ${uri}"))
       headers    = req.headers
       maybeUserId     = headers.get(ci"User-Id").map(_.head).map(_.value)
       maybeBucketName = headers.get(ci"Bucket-Id").map(_.head).map(_.value)
+//      _          <- OptionT.liftF(ctx.logger.debug(s"URI ${uri} \n$maybeUserId"))
       //      _          <- OptionT.liftF(ctx.logger.debug(maybeUserId.toString+"//"+maybeBucketName.toString))
       ress            <- (maybeUserId,maybeBucketName) match {
         case (Some(userId),Some(bucketName)) =>   for {

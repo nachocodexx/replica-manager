@@ -31,6 +31,8 @@ import org.http4s.circe.CirceEntityEncoder._
 import org.http4s.server.AuthMiddleware
 import org.typelevel.ci._
 //
+import scala.concurrent.duration._
+import language.postfixOps
 import java.util.UUID
 import scala.concurrent.ExecutionContext.global
 //
@@ -64,6 +66,9 @@ class HttpServer(sDownload:Semaphore[IO])(implicit ctx:NodeContext) {
   def run(): IO[Unit] = BlazeServerBuilder[IO](executionContext = global)
       .bindHttp(ctx.config.port,ctx.config.host)
       .withHttpApp(httpApp = httpApp)
+      .withMaxConnections(ctx.config.maxConnections)
+      .withBufferSize(ctx.config.bufferSize)
+      .withResponseHeaderTimeout(ctx.config.responseHeaderTimeoutMs milliseconds)
       .serve
       .compile
       .drain

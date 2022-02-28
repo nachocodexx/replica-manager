@@ -4,8 +4,24 @@ import cats.implicits._
 import cats.effect._
 import mx.cinvestav.commons.types.NodeX
 import mx.cinvestav.commons.balancer.v2.{Balancer, LoadBalancer}
+import scala.concurrent.duration._
+import language.postfixOps
 class LoadBalancingSpec extends munit .CatsEffectSuite {
 
+  test("M"){
+    val x = Map("a"->0,"b"->0,"c"->0)
+    val y = Map("a"->1,"c"->2)
+    println(y|+|x)
+  }
+  test("O"){
+    for {
+      t0 <- IO.monotonic.map(_.toMillis)
+      _ <- IO.sleep(1 seconds)
+      t1 <- IO.monotonic.map(_.toMillis)
+      x   = t1-t0
+      _ <- IO.println(x)
+    } yield ()
+  }
   test("A"){
     val numbers = List(0,1)
     val letters = List("a","b","c","d")

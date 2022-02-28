@@ -68,14 +68,15 @@ object Helpers {
       )}
       responses <- Stream.emits(requests).flatMap(r=>
 
-        Stream.eval(ctx.logger.debug(s"GET_INFO ${r.uri}"))*>ctx.client.stream(r).evalMap{
+//        Stream.eval(ctx.logger.debug(s"GET_INFO ${r.uri}"))*>
+          ctx.client.stream(r).evalMap{
           _.as[NodeInfo].handleErrorWith(e=> ctx.logger.error(e.getMessage) *> NodeInfo.empty.pure[IO])
         }.handleErrorWith{ e=>
           ctx.logger.error(e.getMessage).pureS *> Stream.emit(NodeInfo.empty)
         }
 
       ).compile.to(List).onError{ e=> ctx.logger.error(e.getMessage)}
-      _ <- ctx.logger.debug("___________________________________")
+//      _ <- ctx.logger.debug("___________________________________")
     } yield responses
   }
 
@@ -110,104 +111,106 @@ object Helpers {
     newEvent
   }
 
-  def serviceReplicationDaemon(s:SignallingRef[IO,Boolean],period:FiniteDuration = 1 second )(implicit ctx:NodeContext): IO[Unit] = {
-    if(ctx.config.serviceReplicationDaemon)  {
-      val app = for {
+//  def serviceReplicationDaemon(s:SignallingRef[IO,Boolean],period:FiniteDuration = 1 second )(implicit ctx:NodeContext): IO[Unit] = {
+//    if(ctx.config.serviceReplicationDaemon)  {
+//      val app = for {
+//
+//        currentState  <- ctx.state.get
+//        //        SEMAPHORE
+//        _             <- currentState.systemSemaphore.acquire
+//        threshold     = currentState.serviceReplicationThreshold
+//        rawEvents     = currentState.events
+//        events        = Events.filterEventsMonotonic(events=rawEvents)
+//        nodes         = Events.getAllNodeXs(events=events)
+//        maxAR         = 5
+//        nodesLen      = nodes.length
+//        _             <- if(nodesLen < maxAR && nodesLen>0) for {
+//          _      <- IO.unit
+//          ufs    = nodes.map(x=>UF.calculate(total =x.cacheSize,used= x.usedCacheSize,objectSize=0))
+//          avgUfs = ufs.sum/nodesLen
+//
+//          _      <- ctx.logger.debug(s"AVG_CACHE_SIZE_UF = $avgUfs")
+//          signalValue <- s.get
+//          _      <- ctx.logger.debug(s"SYSTEM_REP_SIGNAL $signalValue")
+//          _      <- if(avgUfs >= threshold  & !signalValue) for {
+////            _ <- currentState.systemRepSignal.set(true)
+//            _ <- Helpers.createNode(s).flatMap{ x =>
+//              ctx.logger.debug(s"CREATED_NODE_SUCCESSFULLY")
+//            }.onError{ e=>
+//               ctx.logger.debug(s"CREATE_NODE_ERROR ${e.getMessage}")
+//            }
+//          } yield ()
+//          else IO.unit
+//          _ <- ctx.logger.debug("____________________________________________________")
+//        } yield ()
+//        //     ______________________________________________________
+//        else IO.unit
+//        _             <- currentState.systemSemaphore.release.delayBy(5 seconds)
+//      } yield ()
+//
+//
+//      fs2.Stream.awakeEvery[IO](period=period).evalMap{ _ =>app}.compile.drain
+//    }
+//    else IO.unit
+//  }
 
-        currentState  <- ctx.state.get
-        //        SEMAPHORE
-        _             <- currentState.systemSemaphore.acquire
-        threshold     = currentState.serviceReplicationThreshold
-        rawEvents     = currentState.events
-        events        = Events.filterEventsMonotonic(events=rawEvents)
-        nodes         = Events.getAllNodeXs(events=events)
-        nodesLen      = nodes.length
-        _             <- if(nodesLen < currentState.maxAR && nodesLen>0) for {
-          _      <- IO.unit
-          ufs    = nodes.map(x=>UF.calculate(total =x.cacheSize,used= x.usedCacheSize,objectSize=0))
-          avgUfs = ufs.sum/nodesLen
-
-          _      <- ctx.logger.debug(s"AVG_CACHE_SIZE_UF = $avgUfs")
-          signalValue <- s.get
-          _      <- ctx.logger.debug(s"SYSTEM_REP_SIGNAL $signalValue")
-          _      <- if(avgUfs >= threshold  & !signalValue) for {
-//            _ <- currentState.systemRepSignal.set(true)
-            _ <- Helpers.createNode(s).flatMap{ x =>
-              ctx.logger.debug(s"CREATED_NODE_SUCCESSFULLY")
-            }.onError{ e=>
-               ctx.logger.debug(s"CREATE_NODE_ERROR ${e.getMessage}")
-            }
-          } yield ()
-          else IO.unit
-          _ <- ctx.logger.debug("____________________________________________________")
-        } yield ()
-        //     ______________________________________________________
-        else IO.unit
-        _             <- currentState.systemSemaphore.release.delayBy(5 seconds)
-      } yield ()
-
-
-      fs2.Stream.awakeEvery[IO](period=period).evalMap{ _ =>app}.compile.drain
-    }
-    else IO.unit
-  }
-
-  def createNode(s:SignallingRef[IO,Boolean])(implicit ctx:NodeContext) = {
-    for {
-      _                  <- ctx.logger.debug(s"INIT_NODE_CREATION")
-      currentState       <- ctx.state.get
-      rawEvents          = currentState.events
-      events             = Events.filterEventsMonotonicV2(events=rawEvents)
-      nodesLen           = Events.onlyAddedNode(events=events).length
-//      signalSysRep       = currentState.systemRepSignal
-      signalValue        <- s.get
-      _                  <- ctx.logger.debug(s"CURRENT_SIGNAL_VAL $signalValue")
-      _                  <- ctx.logger.debug(s"NODES_LEN $nodesLen")
-      _                  <- ctx.logger.debug(s"MAX_AR ${currentState.maxAR}")
-      systemRepResponse  <- if(nodesLen < currentState.maxAR && !signalValue) for {
-        _                <- s.set(true)
-        systemRepPayload   = Json.obj(
-          "poolId"->ctx.config.nodeId.asJson,
-          "cacheSize" -> ctx.config.defaultCacheSize.asJson,
-          "policy" -> ctx.config.defaultCachePolicy.asJson,
-          "basePort" -> ctx.config.defaultCachePort.asJson,
-          "networkName" -> "my-net".asJson,
-          "image" -> Json.obj(
-            "name"->"nachocode/cache-node".asJson,
-            "tag" -> "v2".asJson
-          ),
-          "environments" -> Map(
-            "POOL_HOSTNAME" -> ctx.config.nodeId.asJson,
-            "POOL_PORT" -> ctx.config.port.toString.asJson
-          ).asJson
-        )
-        _                  <- ctx.logger.debug("AFTER_PAYLOAD")
-        uriStr = ctx.config.systemReplication.createNodeStr
-        _ <- ctx.logger.debug(s"SYS_REP_STR_URI $uriStr")
-        uri  =  Uri.unsafeFromString(uriStr)
-//          ctx.config.systemReplication.createNodeUri
-        _ <- ctx.logger.debug(s"SYS_REP_URI $uri")
-        systemRepReq       = Request[IO](
-          method = Method.POST,
-          uri = uri,
-          headers = Headers(
-            Header.Raw(CIString("Pool-Node-Length"), nodesLen.toString),
-            Header.Raw(CIString("Host-Log-Path"),ctx.config.hostLogPath),
-            Header.Raw(CIString("Max-AR"),currentState.maxAR.toString)
-          )
-        ).withEntity(systemRepPayload)
-        _                  <- ctx.logger.debug("AFTER_REQUEST")
-          systemRepResponse <- ctx.client.stream(systemRepReq).evalMap{ res=>
-            ctx.logger.debug(res.toString) *> ctx.logger.debug(s"SYS_REP_STATUS ${res.status}")
-          }.compile.drain.onError(e=>ctx.logger.debug(s"ERROR ${e.getMessage}"))
-        _                  <- ctx.logger.debug("AFTER_RESPONSE")
-        _                   <- ctx.logger.debug(systemRepResponse.toString)
-        _                  <- ctx.logger.debug("SYSTEM_REP_SIGNAL OFF")
-      } yield ()
-      else IO.unit
-      _                  <- IO.sleep(10 seconds) *> s.set(false)
-    } yield systemRepResponse
-  }
+//  def createNode(s:SignallingRef[IO,Boolean])(implicit ctx:NodeContext) = {
+//    for {
+//      _                  <- ctx.logger.debug(s"INIT_NODE_CREATION")
+//      currentState       <- ctx.state.get
+//      rawEvents          = currentState.events
+//      events             = Events.filterEventsMonotonicV2(events=rawEvents)
+//      nodesLen           = Events.onlyAddedNode(events=events).length
+////      signalSysRep       = currentState.systemRepSignal
+//      signalValue        <- s.get
+//      _                  <- ctx.logger.debug(s"CURRENT_SIGNAL_VAL $signalValue")
+//      _                  <- ctx.logger.debug(s"NODES_LEN $nodesLen")
+////      _                  <- ctx.logger.debug(s"MAX_AR ${currentState.maxAR}")
+//      maxAR = 5
+//      systemRepResponse  <- if(nodesLen < maxAR && !signalValue) for {
+//        _                <- s.set(true)
+//        systemRepPayload   = Json.obj(
+//          "poolId"->ctx.config.nodeId.asJson,
+//          "cacheSize" -> ctx.config.defaultCacheSize.asJson,
+//          "policy" -> ctx.config.defaultCachePolicy.asJson,
+//          "basePort" -> ctx.config.defaultCachePort.asJson,
+//          "networkName" -> "my-net".asJson,
+//          "image" -> Json.obj(
+//            "name"->"nachocode/cache-node".asJson,
+//            "tag" -> "v2".asJson
+//          ),
+//          "environments" -> Map(
+//            "POOL_HOSTNAME" -> ctx.config.nodeId.asJson,
+//            "POOL_PORT" -> ctx.config.port.toString.asJson
+//          ).asJson
+//        )
+//        _                  <- ctx.logger.debug("AFTER_PAYLOAD")
+//        uriStr = ctx.config.systemReplication.createNodeStr
+//        _ <- ctx.logger.debug(s"SYS_REP_STR_URI $uriStr")
+//        uri  =  Uri.unsafeFromString(uriStr)
+////          ctx.config.systemReplication.createNodeUri
+//        _ <- ctx.logger.debug(s"SYS_REP_URI $uri")
+//        systemRepReq       = Request[IO](
+//          method = Method.POST,
+//          uri = uri,
+//          headers = Headers(
+//            Header.Raw(CIString("Pool-Node-Length"), nodesLen.toString),
+//            Header.Raw(CIString("Host-Log-Path"),ctx.config.hostLogPath),
+//            Header.Raw(CIString("Max-AR"),maxAR.toString)
+//          )
+//        ).withEntity(systemRepPayload)
+//        _                  <- ctx.logger.debug("AFTER_REQUEST")
+//          systemRepResponse <- ctx.client.stream(systemRepReq).evalMap{ res=>
+//            ctx.logger.debug(res.toString) *> ctx.logger.debug(s"SYS_REP_STATUS ${res.status}")
+//          }.compile.drain.onError(e=>ctx.logger.debug(s"ERROR ${e.getMessage}"))
+//        _                  <- ctx.logger.debug("AFTER_RESPONSE")
+//        _                   <- ctx.logger.debug(systemRepResponse.toString)
+//        _                  <- ctx.logger.debug("SYSTEM_REP_SIGNAL OFF")
+//      } yield ()
+//      else IO.unit
+//      _                  <- IO.sleep(10 seconds) *> s.set(false)
+//    } yield systemRepResponse
+//  }
 
   //
   def uploadSameLogic(userId:String,
@@ -301,51 +304,51 @@ object Helpers {
     }
   }
   //  _________________________________
-  def replicationDaemon(sReplication:Semaphore[IO], period:FiniteDuration= 10 seconds,signal:SignallingRef[IO,Boolean])(implicit ctx:NodeContext): IO[Unit] = {
-    val app = for {
-      currentState  <- ctx.state.get
-      _             <- ctx.logger.debug(s"<---REPLICATION DAEMON[${currentState.replicationStrategy}]--->")
-      rawEvents     = currentState.events
-      events        = Events.orderAndFilterEventsMonotonicV2(events=rawEvents)
-      dataReplicationStrategy  = currentState.replicationStrategy
-      hotData       <- dataReplicationStrategy match{
-        case "static" => Events.getDumbObject(events=events).pure[IO]
-        case "v0"     => DataReplication.selectedHotV0(events=rawEvents)
-        case "v1"     => DataReplication.selectHotDataV1(events)
-        case "v2"     => DataReplication.selectHotDataV2(events)
-        case "v3"     => DataReplication.selectHotDataV3(events).pure[IO].onError{ t=>
-          ctx.errorLogger.error(t.getMessage)
-        }
-      }
-      _             <- ctx.logger.debug(s"HOT_DATA_SIZE ${hotData.length}")
-      _             <- if(hotData.isEmpty) ctx.logger.debug(s"No objects to replicate")
-      else for {
-        _   <- IO.unit
-        ars = Events.getAllNodeXs(events = rawEvents.sortBy(_.monotonicTimestamp))
-        _   <- sReplication.acquire
-        _   <- DataReplication.run(ars=ars,events= events,hotData= hotData)
-        _ <- sReplication.release.delayBy(100 milliseconds)
-      } yield ()
-      _ <- ctx.logger.debug("____________________________________________")
-      } yield ( )
-
-    for {
-      currentState <- ctx.state.get
-      _ <- if(currentState.replicationDaemon)
-       fs2.Stream.awakeEvery[IO](period=period) .evalMap(_ => app)
-      .interruptWhen(signal)
-      .compile.drain.onError{ e=>
-      ctx.errorLogger.error(e.getMessage)  *> ctx.errorLogger.error(e.getStackTrace.mkString("Array(", ", ", ")"))
-    }
-    else IO.unit
-    } yield ()
-
-  }
+//  def replicationDaemon(sReplication:Semaphore[IO], period:FiniteDuration= 10 seconds,signal:SignallingRef[IO,Boolean])(implicit ctx:NodeContext): IO[Unit] = {
+//    val app = for {
+//      currentState  <- ctx.state.get
+//      _             <- ctx.logger.debug(s"<---REPLICATION DAEMON[${currentState.replicationStrategy}]--->")
+//      rawEvents     = currentState.events
+//      events        = Events.orderAndFilterEventsMonotonicV2(events=rawEvents)
+//      dataReplicationStrategy  = currentState.replicationStrategy
+//      hotData       <- dataReplicationStrategy match{
+//        case "static" => Events.getDumbObject(events=events).pure[IO]
+//        case "v0"     => DataReplication.selectedHotV0(events=rawEvents)
+//        case "v1"     => DataReplication.selectHotDataV1(events)
+//        case "v2"     => DataReplication.selectHotDataV2(events)
+//        case "v3"     => DataReplication.selectHotDataV3(events).pure[IO].onError{ t=>
+//          ctx.errorLogger.error(t.getMessage)
+//        }
+//      }
+//      _             <- ctx.logger.debug(s"HOT_DATA_SIZE ${hotData.length}")
+//      _             <- if(hotData.isEmpty) ctx.logger.debug(s"No objects to replicate")
+//      else for {
+//        _   <- IO.unit
+//        ars = Events.getAllNodeXs(events = rawEvents.sortBy(_.monotonicTimestamp))
+//        _   <- sReplication.acquire
+//        _   <- DataReplication.run(ars=ars,events= events,hotData= hotData)
+//        _ <- sReplication.release.delayBy(100 milliseconds)
+//      } yield ()
+//      _ <- ctx.logger.debug("____________________________________________")
+//      } yield ( )
+//
+//    for {
+//      currentState <- ctx.state.get
+//      _ <- if(currentState.replicationDaemon)
+//       fs2.Stream.awakeEvery[IO](period=period) .evalMap(_ => app)
+//      .interruptWhen(signal)
+//      .compile.drain.onError{ e=>
+//      ctx.errorLogger.error(e.getMessage)  *> ctx.errorLogger.error(e.getStackTrace.mkString("Array(", ", ", ")"))
+//    }
+//    else IO.unit
+//    } yield ()
+//
+//  }
 
   def initLoadBalancerV3(balancerToken:String="UF")(implicit ctx:NodeContext): IO[BalancerV3] = for {
     _       <- IO.unit
     newLbV3 = balancerToken match {
-      case  "UF"=> UF()(nodeXOrder)
+      case  "SORTING_UF"=> UF()(nodeXOrder)
       case  "TWO_CHOICES"=> TwoChoices()(nodeXOrder)
       case "ROUND_ROBIN" => RoundRobin(forOperation = "UPLOAD_REQUESTS")(nodeXOrder)
       case "PSEUDO_RANDOM" => PseudoRandom()(nodeXOrder)

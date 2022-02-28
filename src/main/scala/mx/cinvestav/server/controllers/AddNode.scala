@@ -31,7 +31,8 @@ object AddNode {
       rawEvents        = currentState.events
       events           = Events.orderAndFilterEventsMonotonicV2(events = rawEvents)
       nodes            = Events.onlyAddedNode(events=events)
-      response         <- if(nodes.length < currentState.maxAR) for {
+      maxAR            = 5
+      response         <- if(nodes.length < maxAR) for {
         payload        <- req.as[AddedService]
         eventId        = UUID.randomUUID()
         headers        = req.headers

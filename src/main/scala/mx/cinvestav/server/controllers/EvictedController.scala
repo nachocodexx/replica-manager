@@ -17,8 +17,7 @@ object EvictedController {
 
 
   def apply()(implicit ctx:NodeContext) = HttpRoutes.of[IO]{
-    case req@POST -> Root => for {
-//      _ <- ctx.logger.debug("HEREEEEEEEEEEEEEEEE!!!!!!!!!")
+    case req@POST -> Root / "evicted" => for {
       arrivalTime      <- IO.realTime.map(_.toMillis)
       arrivalTimeNanos <- IO.monotonic.map(_.toNanos)
 //      currentState     <- ctx.state.get

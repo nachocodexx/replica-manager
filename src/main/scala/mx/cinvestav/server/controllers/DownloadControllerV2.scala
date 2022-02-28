@@ -30,8 +30,7 @@ object DownloadControllerV2 {
                                 objectSize:Long,
                                 arMap:Map[String,NodeX],
                                 infos:List[Monitoring.NodeInfo],
-                                maxAR:Int,
-                                serviceReplicationDaemon:Boolean
+                                waitingTime:Long =0L,
                               )
 
   //  ____________________________________________________________________
@@ -40,7 +39,10 @@ object DownloadControllerV2 {
       case Some(selectedNode) => for {
         _                   <- IO.unit
         selectedNodeId      = selectedNode.nodeId
-        maybePublicPort     = Events.getPublicPort(events,nodeId = selectedNodeId).map(x=>(x.publicPort,x.ipAddress))
+        maybePublicPort     = Events.getPublicPort(events,nodeId = selectedNodeId)
+          .map(x=>(x.publicPort,x.ipAddress))
+          .orElse((6666,selectedNodeId).some)
+
         newResponse         <- maybePublicPort match {
           case Some((publicPort,ipAddress))=> for {
             _                <- IO.unit
@@ -56,10 +58,12 @@ object DownloadControllerV2 {
               )
             )
           } yield res
-          case None => Forbidden()
+          case None =>
+            ctx.logger.error("NO_PUBLIC_PORT | NO_IP_ADDRESS") *> Forbidden()
         }
       } yield newResponse
-      case None => Forbidden()
+      case None =>
+       ctx.logger.error("NO_SELECTED_NODE") *> Forbidden()
     }
   }
   //  ____________________________________________________________________
@@ -77,6 +81,7 @@ object DownloadControllerV2 {
       arMap                 = x.arMap
       infos                 = x.infos
       subsetNodes           = locations.traverse(arMap.get).get.toNel.get
+      _                     <- ctx.logger.debug(s"LOCATIONS $objectId $locations")
 //    ___________________________________________________
       maybeSelectedNode     = if(subsetNodes.length ==1) subsetNodes.head.some else Events.balanceByReplica(
         downloadBalancerToken,
@@ -84,27 +89,18 @@ object DownloadControllerV2 {
         guid = objectId,
         arMap = subsetNodes.map(x=>x.nodeId->x).toList.toMap,
         events=events,
-        monitoringEx = infos
+        infos = infos
       )
+      _ <- ctx.logger.debug(s"SELECTED_NODE $maybeSelectedNode")
       response              <- maybeSelectedNode match {
         case Some(selectedNode) => for {
           _                  <- IO.unit
           serviceTimeNanos   <- IO.monotonic.map(_.toNanos).map(_ - arrivalTimeNanos)
           selectedNodeId     = selectedNode.nodeId
-          get                = Get(
-                serialNumber=  0,
-                objectId = objectId,
-                objectSize= objectSize,
-                timestamp = arrivalTime,
-                nodeId = selectedNodeId,
-                serviceTimeNanos = serviceTimeNanos,
-                userId = userId,
-                correlationId = operationId
-          )
           newResponse        <- processSelectedNode(objectId)(events, maybeSelectedNode)
-          _                  <- Events.saveEvents(events = get::Nil)
         } yield newResponse
-        case None => Forbidden()
+        case None =>
+          ctx.logger.error("NO_SELECTED_NODE_SUCCESS") *> Forbidden()
       }
     } yield response
   }
@@ -121,10 +117,11 @@ object DownloadControllerV2 {
       objectSize               = x.objectSize
       arMap                    = x.arMap
       infos                    = x.infos
-      maxAR                    = x.maxAR
-      serviceReplicationDaemon = x.serviceReplicationDaemon
+//      maxAR                    = x.maxAR
+//      serviceReplicationDaemon = x.serviceReplicationDaemon
 //    ___________________________________________________________
-      response              <- if(ctx.config.cloudEnabled){
+      predicate             = ctx.config.cloudEnabled  || ctx.config.hasNextPool
+      response              <- if(predicate){
         for {
           _                       <- ctx.logger.debug(s"MISS $objectId")
           nodes                   = Events.getAllNodeXs(events = events)
@@ -133,7 +130,7 @@ object DownloadControllerV2 {
           maybeSelectedNode       <- if(nodes.length==1) nodes.headOption.pure[IO]
           else if(nodesWithAvailablePages.isEmpty)  for{
             _                  <- ctx.logger.debug("ALL NODES ARE FULL - SELECT A NODE RANDOMLY")
-            maybeSelectedNode  = Events.balanceByReplica(downloadBalancer = "PSEUDO_RANDOM")(guid= objectId,arMap = arMap,events=events, monitoringEx = infos)
+            maybeSelectedNode  = Events.balanceByReplica(downloadBalancer = "PSEUDO_RANDOM")(guid= objectId,arMap = arMap,events=events, infos = infos)
           } yield maybeSelectedNode
           else nodesWithAvailablePages.maxByOption(_.availableCacheSize).pure[IO]
 //        _________________________________________________________________________
@@ -165,8 +162,8 @@ object DownloadControllerV2 {
         objectSize               = objectSize,
         arMap                    = arMap,
         infos                    = currentState.infos,
-        maxAR                    = currentState.maxAR,
-        serviceReplicationDaemon = currentState.serviceReplicationDaemon
+//        maxAR                    = 5,
+//        serviceReplicationDaemon = currentState.serviceReplicationDaemon
       )
     //    _____________________________________________________________________________________________________________________
     response         <- maybeLocations match {
@@ -179,27 +176,48 @@ object DownloadControllerV2 {
 
     AuthedRoutes.of[User,IO]{
       case authReq@GET -> Root / "download" / objectId as user => for {
-        waitingTimeStartAt <- IO.monotonic.map(_.toNanos)
+        serviceTimeStart   <- IO.monotonic.map(_.toNanos).map(_ - ctx.initTime)
+        now                <- IO.realTime.map(_.toNanos)
         _                  <- sDownload.acquire
-        operationId        = authReq.req.headers.get(CIString("Operation-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
-        waitingTimeEndAt   <- IO.monotonic.map(_.toNanos)
-        waitingTime        = waitingTimeEndAt - waitingTimeStartAt
-//      ________________________________________________________________
+        headers            = authReq.req.headers
+        operationId        = headers.get(CIString("Operation-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
+        objectSize         = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(0L)
+//          .getOrElse(UUID.randomUUID().toString)
+//
+        waitingTime        <- IO.monotonic.map(_.toNanos).map(_ - ctx.initTime)
+        //      ________________________________________________________________
         response           <- download(operationId)(objectId,authReq,user)
-//      ________________________________________________________________
+        //      ________________________________________________________________
         headers            = response.headers
         selectedNodeId     = headers.get(CIString("Node-Id")).map(_.head.value).getOrElse("")
-//      ________________________________________________________________
-        _                  <- sDownload.release
-        serviceTimeNanos   <- IO.monotonic.map(_.toNanos).map(_ - waitingTimeEndAt)
-        _                  <- ctx.logger.info(s"DOWNLOAD $objectId $selectedNodeId $serviceTimeNanos $operationId")
+        //      ________________________________________________________________
+        serviceTimeEnd     <- IO.monotonic.map(_.toNanos).map(_ - ctx.initTime)
+        serviceTime        = serviceTimeEnd - serviceTimeStart
+        get                = Get(
+          serialNumber     =  0,
+          objectId         = objectId,
+          objectSize       = objectSize,
+          timestamp        = now,
+          nodeId           = selectedNodeId,
+          serviceTimeNanos = serviceTime,
+          userId           = user.id,
+          correlationId    = operationId,
+          serviceTimeEnd   = serviceTimeEnd,
+          serviceTimeStart = serviceTimeStart,
+          waitingTime      = waitingTime
+        )
+        _                  <- Events.saveEvents(events = get::Nil)
+        _                  <- ctx.logger.info(s"DOWNLOAD $objectId $selectedNodeId $serviceTime $operationId")
         newResponse        = response.putHeaders(
           Headers(
             Header.Raw(CIString("Waiting-Time"),waitingTime.toString),
-            Header.Raw(CIString("Service-Time"),serviceTimeNanos.toString)
+            Header.Raw(CIString("Service-Time"),serviceTime.toString),
+            Header.Raw(CIString("Service-Time-Start"),serviceTimeStart.toString),
+            Header.Raw(CIString("Service-Time-End"),serviceTimeEnd.toString),
           )
         )
         _ <- ctx.logger.debug("____________________________________________________")
+        _                  <- sDownload.release
       } yield newResponse
     }
 
