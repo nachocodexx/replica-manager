@@ -57,7 +57,7 @@ object UploadControllerV2 {
           deterministic.PseudoRandom(nodeIds = nodeIds.sorted).balance.some.flatMap(x=>nodes.find(_.nodeId==x))
         case "ROUND_ROBIN" =>
           val defaultCounter = nodeIds.map(x=>x->0).toList.toMap
-          val counter        = Events.onlyPutos(events=events).map(_.asInstanceOf[Put]).groupBy(_.nodeId).map{
+          val counter        = Events.onlyPutos(events=events).map(_.asInstanceOf[Put]).filterNot(_.replication).groupBy(_.nodeId).map{
               case (nodeId,xs)=>nodeId -> xs.length
             }
           deterministic.RoundRobin(nodeIds = nodeIds)
@@ -69,22 +69,6 @@ object UploadControllerV2 {
       response          <- maybeSelectedNode match {
         case Some(node) => for {
           _ <- IO.unit
-//          now             <- IO.realTime.map(_.toMillis)
-//          _               <- Events.saveEvents(
-//            events =  List(
-//              Put(
-//                serialNumber = 0,
-//                objectId = objectId,
-//                objectSize = objectSize,
-//                timestamp = now,
-//                nodeId = node.nodeId,
-//                serviceTimeNanos = 0L,
-//                userId =  userId,
-//                correlationId = operationId,
-//                monotonicTimestamp = 0L
-//              )
-//            )
-//          )
           maybePublicPort = Events.getPublicPort(events,nodeId = node.nodeId).map(x=>( x.publicPort,x.ipAddress))
           res             <- maybePublicPort match {
             case Some((publicPort,ipAddress)) => for{
@@ -101,10 +85,10 @@ object UploadControllerV2 {
                 )
               )
             } yield res
-            case None => Forbidden()
+            case None => ctx.logger.error("NO_PUBLIC_PORT|NO_IP_ADDRESS") *> Forbidden()
           }
         } yield res
-        case None => Forbidden()
+        case None =>ctx.logger.error("NO_SELECTED_NODE")*>Forbidden()
       }
     } yield response
   }
@@ -139,7 +123,7 @@ object UploadControllerV2 {
       headers            = req.headers
       maybeObject        = Events.getObjectById(objectId = objectId,events=events)
       objectSize         = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(0L)
-      maybeLB            = currentState.uploadBalancer
+//      maybeLB            = currentState.uploadBalancer
       response <- maybeObject match {
         case Some(o) => for {
           _     <- IO.unit
@@ -159,17 +143,17 @@ object UploadControllerV2 {
             case None => ctx.logger.debug("NO DISTRIBUTION SCHEMA")*> NotFound()
           }
         } yield res
-        case None => (maybeLB,maybeARNodeX) match {
+        case None => (maybeARNodeX) match {
 //          _________________________________________________
-            case (None,Some(nodes)) => for {
+            case Some(nodes) => for {
 //              lb  <- Helpers.initLoadBalancerV3(ctx.config.uploadLoadBalancer)
               res <- commonCode(operationId)(objectId = objectId,objectSize = objectSize,userId= user.id,events=events,nodes,infos = currentState.infos)
             } yield res
 //          ___________________________________________________
-            case (Some(lb),Some(nodes)) =>
+            case Some(nodes) =>
               commonCode(operationId)(objectId = objectId,objectSize = objectSize,userId= user.id,events=events,nodes,infos=currentState.infos)
 //          ____________________________________________________
-            case (None,None) => ctx.logger.debug("NO_NODES,NO_LB") *> Forbidden()
+            case None => ctx.logger.debug("NO_NODES,NO_LB") *> Forbidden()
           }
       }
 //      departureTime   <- IO.monotonic.map(_.toNanos)
