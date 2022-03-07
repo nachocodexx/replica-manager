@@ -85,6 +85,18 @@ object Declarations {
   }
 
 
+  case class BalanceResponse(
+                             nodeId:String,
+                             dockerPort:Int,
+                             publicPort:Int,
+                             internalIp:String,
+                             timestamp:Long,
+                             apiVersion:Int,
+                             dockerURL:String,
+                             operationId:String,
+                             objectId:String
+                             )
+
   case class User(id:String,bucketName:String)
 
   case class PushResponse(
@@ -129,8 +141,9 @@ object Declarations {
                         events:List[EventX] = Nil,
                         monitoringEvents:List[EventX]= Nil,
                         monitoringEx:Map[String,EventX]= Map.empty[String,EventX],
+                        infos:List[Monitoring.NodeInfo] = Nil
 //                        systemRepSignal:SignallingRef[IO,Boolean],
-                        systemSemaphore:Semaphore[IO],
+//                        systemSemaphore:Semaphore[IO],
 //                        serviceReplicationDaemon:Boolean,
 //                        serviceReplicationThreshold:Double,
 //                        maxAR:Int,
@@ -140,8 +153,7 @@ object Declarations {
 //                        replicationDaemonDelayMillis:Long,
 //                        replicationStrategy:String,
 //                        experimentId:String,
-                        replicationDaemonSingal:SignallingRef[IO,Boolean],
-                        infos:List[Monitoring.NodeInfo] = Nil
+//                        replicationDaemonSingal:SignallingRef[IO,Boolean],
                         )
   case class NodeContext(
                             config: DefaultConfig,

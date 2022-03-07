@@ -33,7 +33,7 @@ import java.net.InetAddress
 
 object Main extends IOApp {
   implicit val config: DefaultConfig = ConfigSource.default.loadOrThrow[DefaultConfig]
-  val threadPool = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(5))
+//  val threadPool = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(5))
 // _______________
   implicit val unsafeLogger: SelfAwareStructuredLogger[IO] = Slf4jLogger.getLogger[IO]
 // ______________________________________
@@ -42,16 +42,15 @@ object Main extends IOApp {
   def initContext(client:Client[IO]): IO[NodeContext] = for {
 //
     initTime        <- 0.pure[IO]
-//      IO.monotonic.map(_.toNanos)
     _               <- Logger[IO].debug(s"CACHE_POOL[${config.nodeId}]")
-    signalRef       <- SignallingRef[IO,Boolean](false)
-    systemSemaphore <- Semaphore[IO](1)
+//    signalRef       <- SignallingRef[IO,Boolean](false)
+//    systemSemaphore <- Semaphore[IO](n = config.nSemaphore)
     _initState      = NodeState(
       status   = commons.status.Up,
       ip       = InetAddress.getLocalHost.getHostAddress,
       downloadBalancerToken = config.downloadLoadBalancer,
-      systemSemaphore = systemSemaphore,
-      replicationDaemonSingal = signalRef
+//      systemSemaphore = systemSemaphore,
+//      replicationDaemonSingal = signalRef
     )
     state           <- IO.ref(_initState)
     ctx             = NodeContext(
@@ -67,8 +66,8 @@ object Main extends IOApp {
 
   override def run(args: List[String]): IO[ExitCode] = {
     for {
-      (client,finalizer) <- BlazeClientBuilder[IO](global).withDefaultSocketReuseAddress.resource.allocated
-      sDownload          <- Semaphore[IO](1)
+      (client,finalizer)         <- BlazeClientBuilder[IO](global).withDefaultSocketReuseAddress.resource.allocated
+      sDownload                  <- Semaphore[IO](config.nSemaphore)
       implicit0(ctx:NodeContext) <- initContext(client)
       _                  <- Daemon(period = ctx.config.monitoringDelayMs milliseconds).compile.drain.start
       _                  <- HttpServer(sDownload).run()

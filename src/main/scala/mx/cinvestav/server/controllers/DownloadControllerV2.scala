@@ -5,8 +5,8 @@ import cats.effect.std.Semaphore
 import cats.implicits._
 import mx.cinvestav.Declarations.{NodeContext, User}
 import mx.cinvestav.Helpers
-import mx.cinvestav.commons.events.{EventX, Get}
-import mx.cinvestav.commons.types.{Monitoring, NodeX}
+import mx.cinvestav.commons.events.{EventX, Get, Put}
+import mx.cinvestav.commons.types.{DumbObject, Monitoring, NodeX}
 import mx.cinvestav.events.Events
 import org.http4s.dsl.io._
 import org.http4s.{AuthedRequest, AuthedRoutes, Header, Headers, Response}
@@ -172,9 +172,92 @@ object DownloadControllerV2 {
     }
     } yield response
 
+  def downloads(operationId:String)(authReq: AuthedRequest[IO,User],user:User)(implicit ctx:NodeContext) = for {
+    arrivalTime       <- IO.realTime.map(_.toMillis)
+    arrivalTimeNanos  <- IO.monotonic.map(_.toNanos)
+    currentState      <- ctx.state.get
+    rawEvents         = currentState.events
+    events            = Events.orderAndFilterEventsMonotonicV2(rawEvents)
+    schema            = Events.generateDistributionSchema(events = events)
+    arMap             = Events.getAllNodeXs(events = events).map(x=>x.nodeId->x).toMap
+    objects           = Events
+      .onlyPutos(events = events)
+      .map(_.asInstanceOf[Put])
+      .filter(_.correlationId == operationId)
+      .map(x=> DumbObject(objectId = x.objectId, objectSize = x.objectSize ))
+    //    maybeLocations    = schema.get(objectId)
+    req               = authReq.req
+//    maybeObjectSize        = req.headers.get(CIString("Object-Size")).map(_.map(_.value.toLongOption)).map(_.toList).getOrElse(Nil).sequence
+    //      .getOrElse(0L)
+
+//    preDownloadParams = PreDownloadParams(
+//      events                   = events,
+//      arrivalTimeNanos         = arrivalTimeNanos,
+//      arrivalTime              = arrivalTime,
+//      userId                   = user.id,
+//      downloadBalancerToken    = currentState.downloadBalancerToken,
+//      objectId                 = objectId,
+//      objectSize               = objectSize,
+//      arMap                    = arMap,
+//      infos                    = currentState.infos,
+//      //        maxAR                    = 5,
+//      //        serviceReplicationDaemon = currentState.serviceReplicationDaemon
+//    )
+    //    _____________________________________________________________________________________________________________________
+//    response         <- maybeLocations match {
+//      case (Some(locations)) => success(operationId,locations)(preDownloadParams)
+//      case None              => notFound(operationId)(preDownloadParams)
+//    }
+  } yield ()
   def apply(sDownload:Semaphore[IO])(implicit ctx:NodeContext) = {
 
     AuthedRoutes.of[User,IO]{
+      case authReq@GET -> Root / "downloads" / operationId as user => for {
+        serviceTimeStart   <- IO.monotonic.map(_.toNanos).map(_ - ctx.initTime)
+        now                <- IO.realTime.map(_.toNanos)
+        _                  <- sDownload.acquire
+        headers            = authReq.req.headers
+        operationId        = headers.get(CIString("Operation-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
+        objectSize         = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(0L)
+        //          .getOrElse(UUID.randomUUID().toString)
+        //
+        waitingTime        <- IO.monotonic.map(_.toNanos).map(_ - ctx.initTime).map(_ - serviceTimeStart)
+        //      ________________________________________________________________
+//        response           <- download(operationId)(operationId,authReq,user)
+        response          <- Ok()
+        //      ________________________________________________________________
+        headers            = response.headers
+        selectedNodeId     = headers.get(CIString("Node-Id")).map(_.head.value).getOrElse("")
+        //      ________________________________________________________________
+        serviceTimeEnd     <- IO.monotonic.map(_.toNanos).map(_ - ctx.initTime)
+        serviceTime        = serviceTimeEnd - serviceTimeStart
+        get                = Get(
+          serialNumber     =  0,
+          objectId         = operationId,
+          objectSize       = objectSize,
+          timestamp        = now,
+          nodeId           = selectedNodeId,
+          serviceTimeNanos = serviceTime,
+          userId           = user.id,
+          correlationId    = operationId,
+          serviceTimeEnd   = serviceTimeEnd,
+          serviceTimeStart = serviceTimeStart,
+          waitingTime      = waitingTime
+        )
+        _                  <- Events.saveEvents(events = get::Nil)
+        _                  <- ctx.logger.info(s"DOWNLOAD $operationId $selectedNodeId $serviceTime $operationId")
+        newResponse        = response.putHeaders(
+          Headers(
+            Header.Raw(CIString("Waiting-Time"),waitingTime.toString),
+            Header.Raw(CIString("Service-Time"),serviceTime.toString),
+            Header.Raw(CIString("Service-Time-Start"),serviceTimeStart.toString),
+            Header.Raw(CIString("Service-Time-End"),serviceTimeEnd.toString),
+          )
+        )
+        _ <- ctx.logger.debug("____________________________________________________")
+        _                  <- sDownload.release
+      } yield newResponse
+    }
       case authReq@GET -> Root / "download" / objectId as user => for {
         serviceTimeStart   <- IO.monotonic.map(_.toNanos).map(_ - ctx.initTime)
         now                <- IO.realTime.map(_.toNanos)
@@ -184,7 +267,7 @@ object DownloadControllerV2 {
         objectSize         = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(0L)
 //          .getOrElse(UUID.randomUUID().toString)
 //
-        waitingTime        <- IO.monotonic.map(_.toNanos).map(_ - ctx.initTime)
+        waitingTime        <- IO.monotonic.map(_.toNanos).map(_ - ctx.initTime).map(_ - serviceTimeStart)
         //      ________________________________________________________________
         response           <- download(operationId)(objectId,authReq,user)
         //      ________________________________________________________________

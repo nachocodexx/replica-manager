@@ -4,6 +4,7 @@ import cats.implicits._
 import cats.data.NonEmptyList
 import cats.effect.IO
 import cats.effect.std.Semaphore
+import mx.cinvestav.Declarations.BalanceResponse
 //import mx.cinvestav.con
 //
 import mx.cinvestav.Declarations.{NodeContext, User}
@@ -20,10 +21,16 @@ import org.http4s.{AuthedRequest, AuthedRoutes, Header, Headers}
 import org.http4s.implicits._
 import org.http4s.dsl.io._
 import org.typelevel.ci.CIString
+import org.http4s.circe.CirceEntityEncoder._
+//import
 //
 import java.util.UUID
 import concurrent.duration._
 import language.postfixOps
+//
+import io.circe._
+import io.circe.generic.auto._
+import io.circe.syntax._
 
 object UploadControllerV2 {
 
@@ -68,22 +75,47 @@ object UploadControllerV2 {
       }
       response          <- maybeSelectedNode match {
         case Some(node) => for {
-          _ <- IO.unit
+          _               <- IO.unit
+          selectedNodeId  = node.nodeId
           maybePublicPort = Events.getPublicPort(events,nodeId = node.nodeId).map(x=>( x.publicPort,x.ipAddress))
           res             <- maybePublicPort match {
             case Some((publicPort,ipAddress)) => for{
-              _          <- IO.unit
-              apiVersion = s"v${ctx.config.apiVersion}"
-              usedPort   = if(!ctx.config.usePublicPort) "6666" else publicPort.toString
+              _              <- IO.unit
+              apiVersionNum  = ctx.config.apiVersion
+              apiVersion     = s"v$apiVersionNum"
+              usePublicPort  = ctx.config.usePublicPort
+              usedPort       = if(!usePublicPort) "6666" else publicPort.toString
+              returnHostname = ctx.config.returnHostname
 //
-              nodeUri    = if(ctx.config.returnHostname) s"http://${node.nodeId}:$usedPort/api/$apiVersion/upload" else  s"http://$ipAddress:$usedPort/api/$apiVersion/upload"
-              res        <- Ok(nodeUri,
-                Headers(
+              nodeUri    = if(returnHostname) s"http://${node.nodeId}:$usedPort/api/$apiVersion/upload" else  s"http://$ipAddress:$usedPort/api/$apiVersion/upload"
+              timestamp  <- IO.realTime.map(_.toMillis)
+//            _______________________________________________
+              balanceRes = BalanceResponse(
+                nodeId       = selectedNodeId,
+                dockerPort = 6666,
+                publicPort   = publicPort,
+                internalIp   = ipAddress,
+                timestamp    = timestamp,
+                apiVersion   = apiVersionNum,
+                dockerURL  = nodeUri,
+                operationId  = operationId,
+                objectId     = objectId
+              )
+//            ______________________________________
+
+              resHeaders = Headers(
                   Header.Raw(CIString("Object-Size"),objectSize.toString) ,
                   Header.Raw(CIString("Node-Id"),node.nodeId),
                   Header.Raw(CIString("Public-Port"),publicPort.toString),
-                )
               )
+              res        <- Ok(balanceRes.asJson,resHeaders)
+//              res        <- Ok(nodeUri,
+//                Headers(
+//                  Header.Raw(CIString("Object-Size"),objectSize.toString) ,
+//                  Header.Raw(CIString("Node-Id"),node.nodeId),
+//                  Header.Raw(CIString("Public-Port"),publicPort.toString),
+//                )
+//              )
             } yield res
             case None => ctx.logger.error("NO_PUBLIC_PORT|NO_IP_ADDRESS") *> Forbidden()
           }
@@ -132,7 +164,10 @@ object UploadControllerV2 {
               _     <- ctx.logger.debug(s"${o.objectId} ALREADY UPLOADED")
               node = Events.getNodeById(events=events,nodeId = nodes.head).get
               x = if(ctx.config.returnHostname) s"http://${node.nodeId}:6666" else  node.httpUrl
-              nodeUri = s"$x/api/v6/upload"
+              nodeUri = s"$x/api/v2/upload"
+
+//              balanceResponse = BalanceResponse()
+
               res <- Ok(nodeUri,Headers(
                 Header.Raw(CIString("Already-Uploaded"),"true"),
                 Header.Raw(CIString("Node-Id"),node.nodeId),
@@ -166,9 +201,15 @@ object UploadControllerV2 {
         val defaultConvertion = (x:FiniteDuration) =>  x.toNanos
         val program = for {
 //
-          serviceTimeStart   <- IO.monotonic.map(defaultConvertion).map(_ - ctx.initTime)
+          serviceTimeStart   <- IO.monotonic.map(defaultConvertion)
+//            .map(_ - ctx.initTime)
           //
           now                <- IO.realTime.map(defaultConvertion)
+          _                  <- s.acquire
+          //      ___________________________________________________________________________________________
+          waitingTime        <- IO.monotonic.map(defaultConvertion).map(_ - serviceTimeStart)
+//            .map(_ - ctx.initTime)
+          //      ______________________________________________________________________________________
           currentState       <- ctx.state.get
           rawEvents          = currentState.events
           events             = Events.orderAndFilterEventsMonotonicV2(rawEvents)
@@ -177,16 +218,12 @@ object UploadControllerV2 {
           operationId        = headers.get(CIString("Operation-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
           objectId           = headers.get(CIString("Object-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
           objectSize         = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(0L)
-          arrivalTime        = headers.get(CIString("Arrival-Time")).map(_.head.value).flatMap(_.toLongOption).getOrElse(0L)
+//          arrivalTime        = headers.get(CIString("Arrival-Time")).map(_.head.value).flatMap(_.toLongOption).getOrElse(0L)
           //      ______________________________________________________________________________________________________________
-          _                  <- ctx.logger.debug(s"TRACE_ARRIVAL_TIME $objectId $arrivalTime")
+//          _                  <- ctx.logger.debug(s"TRACE_ARRIVAL_TIME $objectId $arrivalTime")
           _                  <- ctx.logger.debug(s"REAL_ARRIVAL_TIME $objectId $serviceTimeStart")
           //      ______________________________________________________________________________________________________________
           _                  <- ctx.logger.debug(s"SERVICE_TIME_START $objectId $serviceTimeStart")
-          //      ___________________________________________________________________________________________
-          _                  <- s.acquire
-//
-          waitingTime        <- IO.monotonic.map(defaultConvertion).map(_ - ctx.initTime).map(_ - serviceTimeStart)
 //        ______________________________________________________________
           response           <- controller(
             operationId=operationId,

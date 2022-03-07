@@ -82,6 +82,7 @@ case class DefaultConfig(
                           usePublicPort:Boolean,
                           maxConnections:Int,
                           bufferSize:Int,
-                          responseHeaderTimeoutMs:Long
+                          responseHeaderTimeoutMs:Long,
+                          nSemaphore:Int = 1
                           //                          rabbitmq: RabbitMQClusterConfig
                         )
