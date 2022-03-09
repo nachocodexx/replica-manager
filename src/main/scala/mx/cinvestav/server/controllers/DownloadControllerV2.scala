@@ -257,7 +257,7 @@ object DownloadControllerV2 {
         _ <- ctx.logger.debug("____________________________________________________")
         _                  <- sDownload.release
       } yield newResponse
-    }
+//    }
       case authReq@GET -> Root / "download" / objectId as user => for {
         serviceTimeStart   <- IO.monotonic.map(_.toNanos).map(_ - ctx.initTime)
         now                <- IO.realTime.map(_.toNanos)
