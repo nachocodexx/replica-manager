@@ -33,24 +33,18 @@ import java.net.InetAddress
 
 object Main extends IOApp {
   implicit val config: DefaultConfig = ConfigSource.default.loadOrThrow[DefaultConfig]
-//  val threadPool = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(5))
-// _______________
   implicit val unsafeLogger: SelfAwareStructuredLogger[IO] = Slf4jLogger.getLogger[IO]
 // ______________________________________
   val unsafeErrorLogger: SelfAwareStructuredLogger[IO] = Slf4jLogger.getLoggerFromName("error")
 //
   def initContext(client:Client[IO]): IO[NodeContext] = for {
 //
-    initTime        <- 0.pure[IO]
+//    initTime        <- 0.pure[IO]
     _               <- Logger[IO].debug(s"CACHE_POOL[${config.nodeId}]")
-//    signalRef       <- SignallingRef[IO,Boolean](false)
-//    systemSemaphore <- Semaphore[IO](n = config.nSemaphore)
     _initState      = NodeState(
-      status   = commons.status.Up,
-      ip       = InetAddress.getLocalHost.getHostAddress,
+      status                = commons.status.Up,
+      ip                    = InetAddress.getLocalHost.getHostAddress,
       downloadBalancerToken = config.downloadLoadBalancer,
-//      systemSemaphore = systemSemaphore,
-//      replicationDaemonSingal = signalRef
     )
     state           <- IO.ref(_initState)
     ctx             = NodeContext(
@@ -59,7 +53,7 @@ object Main extends IOApp {
       state=state,
       errorLogger = unsafeErrorLogger,
       client=client,
-      initTime = initTime
+//      initTime = initTime
     )
 //
   } yield ctx
@@ -69,7 +63,7 @@ object Main extends IOApp {
       (client,finalizer)         <- BlazeClientBuilder[IO](global).withDefaultSocketReuseAddress.resource.allocated
       sDownload                  <- Semaphore[IO](config.nSemaphore)
       implicit0(ctx:NodeContext) <- initContext(client)
-      _                  <- Daemon(period = ctx.config.monitoringDelayMs milliseconds).compile.drain.start
+//      _                  <- Daemon(period = ctx.config.monitoringDelayMs milliseconds).compile.drain.start
       _                  <- HttpServer(sDownload).run()
       _                  <- finalizer
     } yield (ExitCode.Success)

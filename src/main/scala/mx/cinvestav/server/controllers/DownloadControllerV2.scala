@@ -5,7 +5,7 @@ import cats.effect.std.Semaphore
 import cats.implicits._
 import mx.cinvestav.Declarations.{NodeContext, User}
 import mx.cinvestav.Helpers
-import mx.cinvestav.commons.events.{EventX, Get, Put}
+import mx.cinvestav.commons.events.{EventX, EventXOps, Get, Put}
 import mx.cinvestav.commons.types.{DumbObject, Monitoring, NodeX}
 import mx.cinvestav.events.Events
 import org.http4s.dsl.io._
@@ -124,7 +124,7 @@ object DownloadControllerV2 {
       response              <- if(predicate){
         for {
           _                       <- ctx.logger.debug(s"MISS $objectId")
-          nodes                   = Events.getAllNodeXs(events = events)
+          nodes                   = EventXOps.getAllNodeXs(events = events)
           nodesWithAvailablePages = nodes.filter(_.availableCacheSize>0)
           arMap                   = nodes.map(x=>x.nodeId->x).toMap
           maybeSelectedNode       <- if(nodes.length==1) nodes.headOption.pure[IO]
@@ -148,7 +148,7 @@ object DownloadControllerV2 {
     rawEvents         = currentState.events
     events            = Events.orderAndFilterEventsMonotonicV2(rawEvents)
     schema            = Events.generateDistributionSchema(events = events)
-    arMap             = Events.getAllNodeXs(events = events).map(x=>x.nodeId->x).toMap
+    arMap             = EventXOps.getAllNodeXs(events = events).map(x=>x.nodeId->x).toMap
     maybeLocations    = schema.get(objectId)
     req               = authReq.req
     objectSize        = req.headers.get(CIString("Object-Size")).map(_.head.value).flatMap(_.toLongOption).getOrElse(0L)
@@ -179,7 +179,7 @@ object DownloadControllerV2 {
     rawEvents         = currentState.events
     events            = Events.orderAndFilterEventsMonotonicV2(rawEvents)
     schema            = Events.generateDistributionSchema(events = events)
-    arMap             = Events.getAllNodeXs(events = events).map(x=>x.nodeId->x).toMap
+    arMap             = EventXOps.getAllNodeXs(events = events).map(x=>x.nodeId->x).toMap
     objects           = Events
       .onlyPutos(events = events)
       .map(_.asInstanceOf[Put])
@@ -213,7 +213,7 @@ object DownloadControllerV2 {
 
     AuthedRoutes.of[User,IO]{
       case authReq@GET -> Root / "downloads" / operationId as user => for {
-        serviceTimeStart   <- IO.monotonic.map(_.toNanos).map(_ - ctx.initTime)
+        serviceTimeStart   <- IO.monotonic.map(_.toNanos)
         now                <- IO.realTime.map(_.toNanos)
         _                  <- sDownload.acquire
         headers            = authReq.req.headers
@@ -221,7 +221,7 @@ object DownloadControllerV2 {
         objectSize         = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(0L)
         //          .getOrElse(UUID.randomUUID().toString)
         //
-        waitingTime        <- IO.monotonic.map(_.toNanos).map(_ - ctx.initTime).map(_ - serviceTimeStart)
+        waitingTime        <- IO.monotonic.map(_.toNanos).map(_ - serviceTimeStart)
         //      ________________________________________________________________
 //        response           <- download(operationId)(operationId,authReq,user)
         response          <- Ok()
@@ -229,7 +229,7 @@ object DownloadControllerV2 {
         headers            = response.headers
         selectedNodeId     = headers.get(CIString("Node-Id")).map(_.head.value).getOrElse("")
         //      ________________________________________________________________
-        serviceTimeEnd     <- IO.monotonic.map(_.toNanos).map(_ - ctx.initTime)
+        serviceTimeEnd     <- IO.monotonic.map(_.toNanos)
         serviceTime        = serviceTimeEnd - serviceTimeStart
         get                = Get(
           serialNumber     =  0,
@@ -258,23 +258,25 @@ object DownloadControllerV2 {
         _                  <- sDownload.release
       } yield newResponse
 //    }
-      case authReq@GET -> Root / "download" / objectId as user => for {
-        serviceTimeStart   <- IO.monotonic.map(_.toNanos).map(_ - ctx.initTime)
-        now                <- IO.realTime.map(_.toNanos)
+      case authReq@GET -> Root / "download" / objectId as user =>
+        val monotonic = IO.monotonic.map(_.toNanos)
+        val realTime  = IO.realTime.map(_.toNanos)
+        for {
+        serviceTimeStart   <- monotonic
+        now                <- realTime
         _                  <- sDownload.acquire
         headers            = authReq.req.headers
         operationId        = headers.get(CIString("Operation-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
         objectSize         = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(0L)
-//          .getOrElse(UUID.randomUUID().toString)
-//
-        waitingTime        <- IO.monotonic.map(_.toNanos).map(_ - ctx.initTime).map(_ - serviceTimeStart)
-        //      ________________________________________________________________
+//      _________________________________________________________________________
+        waitingTime        <- monotonic.map(_ - serviceTimeStart)
+//      ________________________________________________________________________
         response           <- download(operationId)(objectId,authReq,user)
-        //      ________________________________________________________________
+//      _______________________________________________________________________
         headers            = response.headers
-        selectedNodeId     = headers.get(CIString("Node-Id")).map(_.head.value).getOrElse("")
-        //      ________________________________________________________________
-        serviceTimeEnd     <- IO.monotonic.map(_.toNanos).map(_ - ctx.initTime)
+      selectedNodeId       = headers.get(CIString("Node-Id")).map(_.head.value).getOrElse("")
+//      _______________________________________________________________________
+        serviceTimeEnd     <- monotonic
         serviceTime        = serviceTimeEnd - serviceTimeStart
         get                = Get(
           serialNumber     =  0,
@@ -299,7 +301,7 @@ object DownloadControllerV2 {
             Header.Raw(CIString("Service-Time-End"),serviceTimeEnd.toString),
           )
         )
-        _ <- ctx.logger.debug("____________________________________________________")
+        _                  <- ctx.logger.debug("____________________________________________________")
         _                  <- sDownload.release
       } yield newResponse
     }

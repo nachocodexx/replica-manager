@@ -161,7 +161,7 @@ object Declarations {
                             errorLogger: Logger[IO],
                             state:Ref[IO,NodeState],
                             client:Client[IO],
-                            initTime:Long= 0L
+//                            initTime:Long= 0L
 //                            rabbitMQContext:Option[RabbitMQContext]
                           )
 }

@@ -28,7 +28,7 @@ object StatsController {
         currentState       <- ctx.state.get
         rawEvents          = currentState.events
         events             = Events.orderAndFilterEventsMonotonicV2(events = rawEvents)
-        ars                = Events.getAllNodeXs(events=events)
+        ars                = EventXOps.getAllNodeXs(events=events)
           .map {
             node =>
               val nodeId = node.nodeId
@@ -86,8 +86,7 @@ object StatsController {
             case (nodeId, uf) =>
                 Json.obj(
                   nodeId ->Json.obj(
-//                    "diskUF" -> uf.asJson
-                      "UF" -> uf.asJson
+                      "diskUF" -> uf.asJson
                   )
                 )
 //              nodeId -> "uf" -> uf
@@ -103,21 +102,13 @@ object StatsController {
         serviceTimeByNode  = Events.getAvgServiceTimeByNode(events=events)
         stats              = Map(
           "nodeId"                   -> ctx.config.nodeId.asJson,
-//          "replicationDaemon"        -> currentState.replicationDaemon.asJson,
-//          "replicationDaemonDelay"   -> currentState.replicationDaemonDelayMillis.asJson,
-//          "serviceReplicationDaemon" -> currentState.serviceReplicationDaemon.asJson,
-//          "serviceReplicationDaemonThreshold" -> currentState.serviceReplicationThreshold.asJson,
           "port"  -> ctx.config.port.asJson,
           "ipAddress" -> currentState.ip.asJson,
           "availableResources" ->arsJson,
-//          "ufs" -> ufs,
           "distributionSchema" -> distributionSchema.asJson,
           "objectIds" -> objectsIds.sorted.asJson,
           "nodeIds" -> nodeIds.asJson,
           "hitCounterByNode"-> hitCounter.asJson,
-//            .map{
-//            case (nodeId,objects)=> nodeId -> ListMap(objects.toList.sortBy(_._2).reverse :_*)
-//          }.asJson,
           "tempMatrix" -> tempMatrix.toArray.asJson,
           "tempMatrix0" -> tempMatrix0.toArray.asJson,
           "replicaUtilization" -> replicaUtilization.toArray.asJson,
@@ -126,11 +117,7 @@ object StatsController {
             "download" -> currentState.downloadBalancerToken.asJson,
             "upload" -> currentState.uploadBalancer.map(_.token).getOrElse(ctx.config.uploadLoadBalancer).asJson
           ),
-//          "maxReplicationFactor" -> currentState.maxRF.asJson,
-//          "maxAvailableResources" -> currentState.maxAR.asJson,
           "serviceTimes" -> serviceTimeByNode.asJson,
-//          "replicationStrategy" -> ctx.config.dataReplicationStrategy.asJson,
-          "monitoring"-> currentState.monitoringEx.asJson,
           "apiVersion" -> ctx.config.apiVersion.asJson
         )
         response <- Ok(stats)

@@ -5,6 +5,7 @@ import cats.data.NonEmptyList
 import cats.effect.IO
 import cats.effect.std.Semaphore
 import mx.cinvestav.Declarations.BalanceResponse
+import mx.cinvestav.commons.events.EventXOps
 //import mx.cinvestav.con
 //
 import mx.cinvestav.Declarations.{NodeContext, User}
@@ -49,19 +50,25 @@ object UploadControllerV2 {
       _infos             = NonEmptyList.fromListUnsafe(infos)
       nodeIds             = nodes.map(_.nodeId)
       maybeSelectedNode = ctx.config.uploadLoadBalancer match {
-        case "SORTING_UF" => nondeterministic.SortingUF()
+        case "SORTING_UF" =>
+          val selectedNodeIds = nondeterministic.SortingUF()
           .balance(
             infos = _infos,
             objectSize = objectSize
-          ).headOption.flatMap(x=>nodes.find(_.nodeId==x))
+          )
+          val xs = selectedNodeIds.map(nodeId => nodes.find(_.nodeId == nodeId) ).sequence
+          xs
         case "TWO_CHOICES" =>
-          nondeterministic.TwoChoices(
+          val selectedNodeIds = nondeterministic.TwoChoices(
             psrnd = deterministic.PseudoRandom(
               nodeIds = nodeIds
             )
-          ).balance(info = _infos,objectSize = objectSize).some.flatMap(x=>nodes.find(_.nodeId==x))
+          ).balance(info = _infos,objectSize = objectSize)
+          None
+//            .some.flatMap(x=>nodes.find(_.nodeId==x))
         case "PSEUDO_RANDOM" =>
-          deterministic.PseudoRandom(nodeIds = nodeIds.sorted).balance.some.flatMap(x=>nodes.find(_.nodeId==x))
+          val selectedNodeIds = deterministic.PseudoRandom(nodeIds = nodeIds.sorted).balance.some.flatMap(x=>nodes.find(_.nodeId==x))
+          None
         case "ROUND_ROBIN" =>
           val defaultCounter = nodeIds.map(x=>x->0).toList.toMap
           val counter        = Events.onlyPutos(events=events).map(_.asInstanceOf[Put]).filterNot(_.replication).groupBy(_.nodeId).map{
@@ -72,6 +79,7 @@ object UploadControllerV2 {
             nodeIds = nodeIds.sorted,
             counter = counter |+| defaultCounter
           ).some.flatMap(x=>nodes.find(_.nodeId==x))
+          None
       }
       response          <- maybeSelectedNode match {
         case Some(node) => for {
@@ -108,7 +116,7 @@ object UploadControllerV2 {
                   Header.Raw(CIString("Node-Id"),node.nodeId),
                   Header.Raw(CIString("Public-Port"),publicPort.toString),
               )
-              res        <- Ok(balanceRes.asJson,resHeaders)
+              res        <- Ok(balanceRes::Nil.asJson,resHeaders)
 //              res        <- Ok(nodeUri,
 //                Headers(
 //                  Header.Raw(CIString("Object-Size"),objectSize.toString) ,
@@ -132,21 +140,10 @@ object UploadControllerV2 {
     events:List[EventX]=Nil
   )(implicit ctx:NodeContext) =
     for {
-//      arrivalTime        <- IO.realTime.map(_.toMillis)
-//      arrivalTimeNanos   <- IO.monotonic.map(_.toNanos)
-//      currentNodeId      = ctx.config.nodeId
       currentState       <- ctx.state.get
-//      rawEvents          = currentState.events
-//      events             <- IO.delay{Events.orderAndFilterEventsMonotonicV2(rawEvents)}
-//      monitoringInfo     = currentState.mon
-      arMap              <- IO.delay{
-        ctx.config.uploadLoadBalancer match {
-          case "SORTING_UF" | "TWO_CHOICES" => Events.getAllNodeXs(
-            events =rawEvents.sortBy(_.monotonicTimestamp)
-          ).map(x=> x.nodeId->x).toMap
-          case "ROUND_ROBIN" | "PSEUDO_RANDOM" => Events.getAllNodeXs(events=events).map(x=>x.nodeId->x).toMap
-          //          case "PSEUDO_RANDOM"  => Events.getAllNodeXs(events=events).map(x=>x.nodeId->x).toMap
-        }
+      arMap              = ctx.config.uploadLoadBalancer match {
+        case "SORTING_UF" | "TWO_CHOICES" => EventXOps.getAllNodeXs(events =rawEvents.sortBy(_.monotonicTimestamp)).map(x=> x.nodeId->x).toMap
+        case "ROUND_ROBIN" | "PSEUDO_RANDOM" => EventXOps.getAllNodeXs(events=events).map(x=>x.nodeId->x).toMap
       }
       //       NO EMPTY LIST OF RD's
       maybeARNodeX       = NonEmptyList.fromList(arMap.values.toList)
@@ -155,8 +152,7 @@ object UploadControllerV2 {
       headers            = req.headers
       maybeObject        = Events.getObjectById(objectId = objectId,events=events)
       objectSize         = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(0L)
-//      maybeLB            = currentState.uploadBalancer
-      response <- maybeObject match {
+      response           <- maybeObject match {
         case Some(o) => for {
           _     <- IO.unit
           res   <- Events.generateDistributionSchema(events = events).get(o.objectId) match {
@@ -181,12 +177,10 @@ object UploadControllerV2 {
         case None => (maybeARNodeX) match {
 //          _________________________________________________
             case Some(nodes) => for {
-//              lb  <- Helpers.initLoadBalancerV3(ctx.config.uploadLoadBalancer)
               res <- commonCode(operationId)(objectId = objectId,objectSize = objectSize,userId= user.id,events=events,nodes,infos = currentState.infos)
             } yield res
 //          ___________________________________________________
-            case Some(nodes) =>
-              commonCode(operationId)(objectId = objectId,objectSize = objectSize,userId= user.id,events=events,nodes,infos=currentState.infos)
+//            case Some(nodes) => commonCode(operationId)(objectId = objectId,objectSize = objectSize,userId= user.id,events=events,nodes,infos=currentState.infos)
 //          ____________________________________________________
             case None => ctx.logger.debug("NO_NODES,NO_LB") *> Forbidden()
           }
@@ -197,17 +191,19 @@ object UploadControllerV2 {
 
   def apply(s:Semaphore[IO])(implicit ctx:NodeContext)={
     AuthedRoutes.of[User,IO]{
+
       case authReq@POST -> Root / "upload" as user =>
         val defaultConvertion = (x:FiniteDuration) =>  x.toNanos
+        val monotonic         = IO.monotonic.map(defaultConvertion)
         val program = for {
 //
-          serviceTimeStart   <- IO.monotonic.map(defaultConvertion)
+          serviceTimeStart   <- monotonic
 //            .map(_ - ctx.initTime)
           //
           now                <- IO.realTime.map(defaultConvertion)
           _                  <- s.acquire
           //      ___________________________________________________________________________________________
-          waitingTime        <- IO.monotonic.map(defaultConvertion).map(_ - serviceTimeStart)
+          waitingTime        <- monotonic.map(_ - serviceTimeStart)
 //            .map(_ - ctx.initTime)
           //      ______________________________________________________________________________________
           currentState       <- ctx.state.get
@@ -220,8 +216,7 @@ object UploadControllerV2 {
           objectSize         = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(0L)
 //          arrivalTime        = headers.get(CIString("Arrival-Time")).map(_.head.value).flatMap(_.toLongOption).getOrElse(0L)
           //      ______________________________________________________________________________________________________________
-//          _                  <- ctx.logger.debug(s"TRACE_ARRIVAL_TIME $objectId $arrivalTime")
-          _                  <- ctx.logger.debug(s"REAL_ARRIVAL_TIME $objectId $serviceTimeStart")
+          _                  <- ctx.logger.debug(s"ARRIVAL_TIME $objectId $serviceTimeStart")
           //      ______________________________________________________________________________________________________________
           _                  <- ctx.logger.debug(s"SERVICE_TIME_START $objectId $serviceTimeStart")
 //        ______________________________________________________________
@@ -230,7 +225,8 @@ object UploadControllerV2 {
             objectId=objectId,
           )(authReq=authReq,user=user, rawEvents=rawEvents, events=events)
 //        _____________________________________________________________
-          serviceTimeEnd     <- IO.monotonic.map(defaultConvertion).map(_ - ctx.initTime)
+          serviceTimeEnd     <- monotonic
+//            IO.monotonic.map(defaultConvertion)
 //          _                  <- s.release
           serviceTime        = serviceTimeEnd - serviceTimeStart
           //      _________________________________________________________________________________

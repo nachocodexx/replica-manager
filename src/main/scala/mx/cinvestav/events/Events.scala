@@ -512,11 +512,6 @@ object Events {
       .toMap
   }
 //
-  def getOperationsByNodeId(nodeId:String,events:List[EventX]): List[EventX] = events.filter{
-    case d:Get => d.nodeId == nodeId
-    case u:Put => u.nodeId == nodeId
-    case _ => false
-  }
 
   def onlyPutsAndGets(events:List[EventX])  = events.filter{
       case _:Put => true
@@ -544,10 +539,6 @@ object Events {
     case _ => false
   }
 
-  def onlyAddedNode(events:List[EventX]): List[EventX] = events.filter{
-    case _:AddedNode => true
-    case _ => false
-  }
   def getNodeIds(events: List[EventX]) =
     onlyAddedNode(events = events)
       .map(_.asInstanceOf[AddedNode])
@@ -769,9 +760,25 @@ object Events {
       case _ => false
     }
   }
+
+  def onlyAddedNode(events:List[EventX]): List[EventX] = events.filter{
+    case _:AddedNode => true
+    case _ => false
+  }
+
+  def nodesToDumbObject(events:List[EventX]): Map[String, List[DumbObject]] =
+    onlyPutos(events).map(_.asInstanceOf[Put]).map{ up =>
+      Map(up.nodeId -> List( DumbObject(up.objectId,up.objectSize)  ))
+    }.foldLeft(Map.empty[String,List[DumbObject]])(_|+|_)
+
+  def getOperationsByNodeId(nodeId:String,events:List[EventX]): List[EventX] = events.filter{
+    case d:Get => d.nodeId == nodeId
+    case u:Put => u.nodeId == nodeId
+    case _ => false
+  }
 //  Get all current storage nodes
   def getAllNodeXs(events: List[EventX]): List[NodeX] = {
-    val nodesAndDumbObjects   = Events.nodesToDumbObject(events)
+    val nodesAndDumbObjects   = nodesToDumbObject(events)
     onlyAddedNode(events).map(_.asInstanceOf[AddedNode])
       .map{ an =>
         an.addedNodeId -> NodeX(
@@ -814,6 +821,7 @@ object Events {
         )
     }
   }.toList
+
   def nodesToObjectSizes(events:List[EventX]): Map[String, List[Long]] =
     onlyPutos(events).map(_.asInstanceOf[Put]).map{ up =>
       Map(up.nodeId -> List(up.objectSize))
@@ -825,10 +833,6 @@ object Events {
     Map(up.nodeId -> List(up.objectId))
   }.foldLeft(Map.empty[String,List[String]])(_|+|_)
 
-  def nodesToDumbObject(events:List[EventX]): Map[String, List[DumbObject]] =
-    onlyPutos(events).map(_.asInstanceOf[Put]).map{ up =>
-      Map(up.nodeId -> List( DumbObject(up.objectId,up.objectSize)  ))
-    }.foldLeft(Map.empty[String,List[DumbObject]])(_|+|_)
 
   def orderAndFilterEvents(events:List[EventX]):List[EventX] =
     Events.filterEvents(EventXOps.OrderOps.byTimestamp(events=events).reverse)
