@@ -7,7 +7,7 @@ import cats.effect.{FiberIO, IO, Ref}
 import mx.cinvestav.commons.balancer.v2.Balancer
 import mx.cinvestav.commons.status.Status
 import mx.cinvestav.config.{DefaultConfig, NodeInfo}
-import mx.cinvestav.commons.types.NodeX
+import mx.cinvestav.commons.types.{NodeUFs, NodeX}
 import mx.cinvestav.commons.balancer.v3.{Balancer => BalancerV3}
 import mx.cinvestav.commons.events.{AddedNode, Del, Downloaded, EventX, Evicted, Get, Missed, ObjectHashing, Push, Put, RemovedNode, Replicated, UpdatedNodePort, Uploaded, Pull => PullEvent, TransferredTemperature => SetDownloads}
 import mx.cinvestav.events.Events.{GetInProgress, HotObject, MeasuredServiceTime, MonitoringStats, UpdatedNetworkCfg}
@@ -94,8 +94,12 @@ object Declarations {
                              apiVersion:Int,
                              dockerURL:String,
                              operationId:String,
-                             objectId:String
+                             objectId:String,
+                             ufs:NodeUFs
                              )
+  object BalanceResponse {
+    def empty = BalanceResponse(nodeId = "",dockerPort = 0, publicPort =0,internalIp = "", timestamp = 0L, apiVersion = 0,dockerURL ="",operationId = "",objectId="",ufs = NodeUFs.empty())
+  }
 
   case class User(id:String,bucketName:String)
 

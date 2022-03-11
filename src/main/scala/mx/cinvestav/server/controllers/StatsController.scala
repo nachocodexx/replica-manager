@@ -2,7 +2,7 @@ package mx.cinvestav.server.controllers
 
 import cats.implicits._
 import cats.effect._
-import mx.cinvestav.commons.events.UpdatedNodePort
+import mx.cinvestav.commons.events.{EventXOps, UpdatedNodePort}
 
 import scala.collection.immutable.ListMap
 //
@@ -28,77 +28,25 @@ object StatsController {
         currentState       <- ctx.state.get
         rawEvents          = currentState.events
         events             = Events.orderAndFilterEventsMonotonicV2(events = rawEvents)
-        ars                = EventXOps.getAllNodeXs(events=events)
-          .map {
-            node =>
+        ars                = EventXOps.getAllNodeXs(events=events).map { node =>
               val nodeId = node.nodeId
-              val ops        = Events.getOperationsByNodeId(nodeId = nodeId, events = rawEvents)
               val publicPort = Events.getPublicPort(events= events,nodeId).map(_.publicPort).getOrElse(6666)
-              val gets = ops.count(_.eventType == "GET")
-              val puts = ops.count(_.eventType == "PUT")
-              node.copy(
-                metadata = Map(
-                  "TOTAL_REQUESTS" -> (gets + puts).toString,
-                  "DOWNLOAD_REQUESTS" -> gets.toString,
-                  "UPLOAD_REQUESTS" -> puts.toString,
-                  "PUBLIC_PORT" -> publicPort.toString
-                )
-              )
+            node.copy(
+              metadata = node.metadata ++ Map("PUBLIC_PORT"->publicPort.toString)
+            )
           }
-
         distributionSchema = Events.generateDistributionSchema(events = events)
         objectsIds         = Events.getObjectIds(events = events)
         hitCounter         = Events.getHitCounterByNode(events = events)
         hitRatioInfo       = Events.getGlobalHitRatio(events=events)
         tempMatrix         = Events.generateTemperatureMatrixV2(events = events,windowTime = 0)
-        tempMatrix0         = Events.generateTemperatureMatrixV3(events = events,windowTime = 0)
+        tempMatrix0        = Events.generateTemperatureMatrixV3(events = events,windowTime = 0)
         replicaUtilization = Events.generateReplicaUtilization(events =events)
         nodeIds            = Events.getNodeIds(events = events)
-//        hostPorts          = Events.getAllUpdatedNodePort(events=events)
-//        hostPortsMap       = Events.getAllUpdatedNodePort(events=events).map(_.asInstanceOf[UpdatedNodePort]).map(x=>x.nodeId->x.newPort).toMap
-//        defaultNodesPorts  = ars.filterNot(x=>hostPortsMap.contains(x.nodeId)).map{ x=>
-//          x.nodeId -> x.port
-//        }.toMap
-//        hostPortAndDefaultMap =  hostPortsMap.concat(defaultNodesPorts)
-//        hostPortsJson      = hostPortAndDefaultMap
-//          .map{
-//            case (nodeId, hostPort) => Json.obj(
-//              nodeId -> Json.obj(
-//                "hostPort"-> hostPort.asJson
-//              )
-//            )
-//          }.foldLeft(Json.Null)((x,y)=>x.deepMerge(y))
-//          .toMap.asJson
-//        updatedNodePorts   = Events.getAllUpdatedNodePort(events)
-//        memoryUf           = Events.calculateMemoryUFByNode(events=events,objectSize = 0).map{
-//            case (nodeId, uf) =>
-//              Json.obj(
-//                nodeId ->Json.obj(
-//                  "memoryUF" -> uf.asJson
-//                )
-//              )
-//            //              nodeId -> "uf" -> uf
-//          }
-        //          .foldLeft(Json.Null)((x,y)=>x.deepMerge(y))
-
-        ufs                = Events.calculateUFs(events=events)
-          .map{
-            case (nodeId, uf) =>
-                Json.obj(
-                  nodeId ->Json.obj(
-                      "diskUF" -> uf.asJson
-                  )
-                )
-//              nodeId -> "uf" -> uf
-          }.foldLeft(Json.Null)((x,y)=>x.deepMerge(y))
-//        _ <- ctx.logger.debug(memoryUf.toString)
-        arsJson =  ars.map(x=>(x.nodeId->x))
+        arsJson            =  ars.map(x=>x.nodeId->x)
           .toMap
           .asJson
-          .deepMerge(ufs)
-//          .deepMerge(hostPortsJson)
-//          .deepMerge(memoryUf)
-//        _ <- ctx.logger.debug(arsJson.toString)
+//      ________________________________________________________
         serviceTimeByNode  = Events.getAvgServiceTimeByNode(events=events)
         stats              = Map(
           "nodeId"                   -> ctx.config.nodeId.asJson,

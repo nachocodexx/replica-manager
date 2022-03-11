@@ -3,7 +3,7 @@ package mx.cinvestav.events
 import cats.data.NonEmptyList
 import cats.implicits._
 import cats.effect._
-import mx.cinvestav.commons.events.{Del, UpdatedNodePort}
+import mx.cinvestav.commons.events.{Del, PutCompleted, UpdatedNodePort}
 import mx.cinvestav.commons.types.Monitoring
 
 import java.util.UUID
@@ -492,6 +492,10 @@ object Events {
 
   def getObjectById(objectId:String,events:List[EventX]):Option[DumbObject] = onlyPutos(events=events).map(_.asInstanceOf[Put]).find(_.objectId == objectId)
     .map(x=>DumbObject(x.objectId,x.objectSize))
+  def getObjectByIdV2(objectId:String,events:List[EventX]):Option[DumbObject] =
+    EventXOps.onlyPutCompleteds(events=events)
+    .map(_.asInstanceOf[PutCompleted]).find(_.objectId == objectId)
+    .map(x=>DumbObject(x.objectId,x.objectSize))
   //      .distinctBy(_.objectId)
 //
   def getVolumen(events:List[EventX]) = {
@@ -525,8 +529,8 @@ object Events {
   def getLastWaitingTime(events:List[EventX]): Long = {
     val lastOp = getLastOperation(events=events)
     lastOp match {
-      case Some(p:Put) => p.waitingTime
-      case Some(g:Get) => g.waitingTime
+      case Some(p:Put) => 0L
+      case Some(g:Get) => 0L
       case _ => 0L
     }
   }

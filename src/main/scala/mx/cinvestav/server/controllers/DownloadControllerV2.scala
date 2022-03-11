@@ -5,7 +5,7 @@ import cats.effect.std.Semaphore
 import cats.implicits._
 import mx.cinvestav.Declarations.{NodeContext, User}
 import mx.cinvestav.Helpers
-import mx.cinvestav.commons.events.{EventX, EventXOps, Get, Put}
+import mx.cinvestav.commons.events.{EventX, EventXOps, Get, Put, PutCompleted}
 import mx.cinvestav.commons.types.{DumbObject, Monitoring, NodeX}
 import mx.cinvestav.events.Events
 import org.http4s.dsl.io._
@@ -180,9 +180,9 @@ object DownloadControllerV2 {
     events            = Events.orderAndFilterEventsMonotonicV2(rawEvents)
     schema            = Events.generateDistributionSchema(events = events)
     arMap             = EventXOps.getAllNodeXs(events = events).map(x=>x.nodeId->x).toMap
-    objects           = Events
-      .onlyPutos(events = events)
-      .map(_.asInstanceOf[Put])
+    objects           = EventXOps
+      .onlyPutCompleteds(events = events)
+      .map(_.asInstanceOf[PutCompleted])
       .filter(_.correlationId == operationId)
       .map(x=> DumbObject(objectId = x.objectId, objectSize = x.objectSize ))
     //    maybeLocations    = schema.get(objectId)
@@ -242,7 +242,7 @@ object DownloadControllerV2 {
           correlationId    = operationId,
           serviceTimeEnd   = serviceTimeEnd,
           serviceTimeStart = serviceTimeStart,
-          waitingTime      = waitingTime
+//          waitingTime      = waitingTime
         )
         _                  <- Events.saveEvents(events = get::Nil)
         _                  <- ctx.logger.info(s"DOWNLOAD $operationId $selectedNodeId $serviceTime $operationId")
@@ -289,7 +289,7 @@ object DownloadControllerV2 {
           correlationId    = operationId,
           serviceTimeEnd   = serviceTimeEnd,
           serviceTimeStart = serviceTimeStart,
-          waitingTime      = waitingTime
+//          waitingTime      = waitingTime
         )
         _                  <- Events.saveEvents(events = get::Nil)
         _                  <- ctx.logger.info(s"DOWNLOAD $objectId $selectedNodeId $serviceTime $operationId")
