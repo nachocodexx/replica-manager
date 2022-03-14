@@ -39,24 +39,6 @@ object AddNode {
         timestamp      = headers.get(CIString("Timestamp")).flatMap(_.head.value.toLongOption)
         operationId    = headers.get(CIString("Operation-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
         latency        = timestamp.map(arrivalTime - _)
-        //    __________________________________________________
-//        newEvent       = Helpers.getMonitoringStatsFromHeaders(payload.nodeId,arrivalTime)(headers)
-//        _              <- Events.saveMonitoringEvents(event= newEvent)
-//        newNode = payload.nodeId ->  NodeX(
-//          nodeId = payload.nodeId,
-//          ip = payload.hostname,
-//          port = payload.port,
-//          totalStorageCapacity =payload.totalStorageCapacity,
-//          availableStorageCapacity = payload.totalStorageCapacity,
-//          usedStorageCapacity = 0L,
-//          availableCacheSize= payload.cacheSize,
-//          cacheSize =payload.cacheSize,
-//          usedCacheSize = 0,
-//          cachePolicy = payload.cachePolicy,
-//          metadata = Map.empty[String,String]
-//        )
-//        _ <- ctx.logger.debug(s"NEW_NODE ${newNode._2.asJson}")
-//        serviceTime <- IO.realTime.map(_.toMillis).map(_ - arrivalTime)
         serviceTimeNanos <- IO.monotonic.map(_.toNanos).map(_ - arrivalTimeNanos)
         newEvent         =  AddedNode(
           serialNumber = 0,
@@ -65,6 +47,7 @@ object AddNode {
           ipAddress = payload.hostname,
           port      = payload.port,
           totalStorageCapacity = payload.totalStorageCapacity,
+          totalMemoryCapacity =payload.totalMemoryCapacity,
           cacheSize = payload.cacheSize,
           cachePolicy = payload.cachePolicy,
           timestamp = arrivalTime,
