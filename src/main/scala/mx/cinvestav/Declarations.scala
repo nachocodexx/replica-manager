@@ -85,21 +85,21 @@ object Declarations {
   }
 
 
-  case class BalanceResponse(
-                             nodeId:String,
-                             dockerPort:Int,
-                             publicPort:Int,
-                             internalIp:String,
-                             timestamp:Long,
-                             apiVersion:Int,
-                             dockerURL:String,
-                             operationId:String,
-                             objectId:String,
-                             ufs:NodeUFs
-                             )
-  object BalanceResponse {
-    def empty = BalanceResponse(nodeId = "",dockerPort = 0, publicPort =0,internalIp = "", timestamp = 0L, apiVersion = 0,dockerURL ="",operationId = "",objectId="",ufs = NodeUFs.empty())
-  }
+//  case class BalanceResponse(
+//                             nodeId:String,
+//                             dockerPort:Int,
+//                             publicPort:Int,
+//                             internalIp:String,
+//                             timestamp:Long,
+//                             apiVersion:Int,
+//                             dockerURL:String,
+//                             operationId:String,
+//                             objectId:String,
+//                             ufs:NodeUFs
+//                             )
+//  object BalanceResponse {
+//    def empty = BalanceResponse(nodeId = "",dockerPort = 0, publicPort =0,internalIp = "", timestamp = 0L, apiVersion = 0,dockerURL ="",operationId = "",objectId="",ufs = NodeUFs.empty())
+//  }
 
   case class User(id:String,bucketName:String)
 

@@ -4,7 +4,7 @@ import cats.implicits._
 import cats.data.NonEmptyList
 import cats.effect.IO
 import cats.effect.std.Semaphore
-import mx.cinvestav.Declarations.BalanceResponse
+//import mx.cinvestav.Declarations.BalanceResponse
 import mx.cinvestav.commons.events.{EventXOps, PutCompleted}
 import mx.cinvestav.commons.types.DumbObject
 //import mx.cinvestav.con
@@ -13,7 +13,7 @@ import mx.cinvestav.Declarations.{NodeContext, User}
 import mx.cinvestav.Helpers
 import mx.cinvestav.commons.balancer.v3.Balancer
 import mx.cinvestav.commons.events.Put
-import mx.cinvestav.commons.types.{NodeX,Monitoring}
+import mx.cinvestav.commons.types.{NodeX,Monitoring,BalanceResponse}
 import mx.cinvestav.commons.events.EventX
 import mx.cinvestav.events.Events
 import mx.cinvestav.commons.balancer.{nondeterministic,deterministic}
@@ -65,6 +65,9 @@ object UploadControllerV2 {
     userId:String,
     events:List[EventX],
     nodes:NonEmptyList[NodeX],
+    rf:Int = 1
+//    impactFactor:Double
+    
   )(implicit ctx:NodeContext) = {
     for {
       _                  <- IO.unit
@@ -73,18 +76,18 @@ object UploadControllerV2 {
       maybeSelectedNode = ctx.config.uploadLoadBalancer match {
         case "SORTING_UF" =>
           val selectedNodeIds = nondeterministic.SortingUF()
-          .balance(ufs = ufs)
+          .balance(ufs = ufs,takeN = rf)
           val xs = selectedNodeIds.map(nodeId => nodes.find(_.nodeId == nodeId) ).sequence
           xs
         case "TWO_CHOICES" =>
           val selectedNodeIds = nondeterministic.TwoChoices(
             psrnd = deterministic.PseudoRandom(nodeIds = nodeIds)
-          ).balances(ufs =ufs)
+          ).balances(ufs =ufs,takeN = rf)
           val xs = selectedNodeIds.map(nodeId => nodes.find(_.nodeId == nodeId)).sequence
           xs
         case "PSEUDO_RANDOM" =>
           val selectedNodeIds = deterministic.PseudoRandom(nodeIds = nodeIds.sorted)
-            .balanceReplicas(replicaNodes = Nil,takeN=1)
+            .balanceReplicas(replicaNodes = Nil,takeN=rf)
           val xs = selectedNodeIds.map(nodeId => nodes.find(_.nodeId == nodeId)).sequence
           xs
         case "ROUND_ROBIN" =>
@@ -93,10 +96,10 @@ object UploadControllerV2 {
           val counter = Events.onlyPutos(events=events).map(_.asInstanceOf[Put]).filterNot(_.replication).groupBy(_.nodeId).map{
               case (nodeId,xs)=>nodeId -> xs.length
             }
-          val pivotNode = lb.balanceWith(nodeIds =nodeIds,counter = counter |+| defaultCounter)
-          val selectedNodes  = lb.balanceReplicas(
+          val pivotNode     = lb.balanceWith(nodeIds =nodeIds,counter = counter |+| defaultCounter)
+          val selectedNodes = lb.balanceReplicas(
             replicaNodes = pivotNode::Nil,
-            takeN =  1
+            takeN =  rf-1
           )
           val selectedNodes0 = (List(pivotNode) ++ selectedNodes)
           val xs = selectedNodes0.map(nodeId => nodes.find(_.nodeId == nodeId)).sequence
@@ -181,18 +184,20 @@ object UploadControllerV2 {
       }
       //       NO EMPTY LIST OF RD's
       maybeARNodeX       = NonEmptyList.fromList(arMap.values.toList)
+      nN                  = arMap.size
+      impactFactor       = authReq.req.headers.get(CIString("Impact-Factor")).flatMap(_.head.value.toDoubleOption).getOrElse(1/nN.toDouble)
       //   _______________________________________________________________________________
       response           <- maybeObject match {
         case Some(o) => alreadyUploaded(o,events=events)
         case None => maybeARNodeX match {
 //          _________________________________________________
             case Some(nodes) => commonCode(operationId)(
-              objectId = objectId,
+              objectId   = objectId,
               objectSize = objectSize,
-              userId= user.id,
-              events=events,
-              nodes,
-
+              userId     = user.id,
+              events     = events,
+              nodes      = nodes,
+              rf         = math.floor(impactFactor*nN).toInt
             )
 //          ____________________________________________________
             case None => ctx.logger.debug("NO_NODES,NO_LB") *> Forbidden()
@@ -240,6 +245,7 @@ object UploadControllerV2 {
           operationId        = headers.get(CIString("Operation-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
           objectId           = headers.get(CIString("Object-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
           objectSize         = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(0L)
+//          impactFactor       = headers.get(CIString("Impact-Factor")).flatMap(_.head.value.toDoubleOption).getOrElse(1/)
 //      ______________________________________________________________________________________________________________
           _                  <- ctx.logger.debug(s"ARRIVAL_TIME $objectId $serviceTimeStart")
 //      ______________________________________________________________________________________________________________

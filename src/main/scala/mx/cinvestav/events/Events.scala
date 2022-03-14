@@ -335,18 +335,19 @@ object Events {
 //        val nodeId = nodeWithReplicaCounter.toList.get(index).map(_._1).get
 //        arMap.get(nodeId)
       case "SORTING_UF" =>
-        val filteredInfos = infos.filter(x=>arMap.keys.toList.contains(x.nodeId))
-        val selectedNodeId = nondeterministic
-          .SortingUF()
-          .balance(
-            infos = NonEmptyList.fromListUnsafe(filteredInfos),
-            objectSize = objectSize,
-            takeN = 1,
-            mapTotalFn = _.RAMInfo.total,
-            mapUsedFn = _.RAMInfo.used
-          )
+        None
+//        val filteredInfos = infos.filter(x=>arMap.keys.toList.contains(x.nodeId))
+//        val selectedNodeId = nondeterministic
+//          .SortingUF()
+//          .balance(
+//            infos = NonEmptyList.fromListUnsafe(filteredInfos),
+//            objectSize = objectSize,
+//            takeN = 1,
+////            mapTotalFn = _.RAMInfo.total,
+////            mapUsedFn = _.RAMInfo.used
+//          )
 
-        selectedNodeId.headOption.flatMap(arMap.get)
+//        selectedNodeId.headOption.flatMap(arMap.get)
 //        arMap.get(selectedNodeId.head)
       case "TWO_CHOICES" =>
         val filteredInfos = infos.filter(x=>arMap.keys.toList.contains(x.nodeId))
