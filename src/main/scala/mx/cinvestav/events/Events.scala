@@ -448,6 +448,10 @@ object Events {
               monotonicTimestamp = now,
               serialNumber = lastSerialNumber+index
             )
+            case x:PutCompleted => x.copy(
+              monotonicTimestamp = now,
+              serialNumber = lastSerialNumber+index
+            )
             case _ => event
           }
         } yield newEvent
