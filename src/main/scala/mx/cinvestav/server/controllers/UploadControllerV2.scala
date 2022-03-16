@@ -213,6 +213,7 @@ object UploadControllerV2 {
         val defaultConvertion = (x:FiniteDuration) =>  x.toNanos
         val monotonic         = IO.monotonic.map(defaultConvertion)
         val program = for {
+          _                  <- s.acquire
           serviceTimeStart   <- monotonic
           now                <- IO.realTime.map(defaultConvertion)
 //      ______________________________________________________________________________________
@@ -224,7 +225,8 @@ object UploadControllerV2 {
           operationId        = headers.get(CIString("Operation-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
           objectId           = headers.get(CIString("Object-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
           objectSize         = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(0L)
-//          impactFactor       = headers.get(CIString("Impact-Factor")).flatMap(_.head.value.toDoubleOption).getOrElse(1/)
+          fileExtension      = headers.get(CIString("File-Ext")).map(_head.value).getOrElse("")
+          filePath           = headers.get(CIString("File-Path")).map(_.head.value).getOrElse(s"$objectId.$fileExtension")
 //      ______________________________________________________________________________________________________________
           _                  <- ctx.logger.debug(s"ARRIVAL_TIME $objectId $serviceTimeStart")
 //      ______________________________________________________________________________________________________________
@@ -268,6 +270,7 @@ object UploadControllerV2 {
             )
           )
           _                  <- ctx.logger.debug("____________________________________________________")
+          _                  <- s.release
         } yield newResponse
 //      ______________________________________________________________________________________
         program.handleErrorWith{e=>

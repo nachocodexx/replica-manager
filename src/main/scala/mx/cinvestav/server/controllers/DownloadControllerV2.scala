@@ -3,11 +3,14 @@ package mx.cinvestav.server.controllers
 import cats.effect._
 import cats.effect.std.Semaphore
 import cats.implicits._
+//
+import mx.cinvestav.commons.balancer.{deterministic,nondeterministic}
 import mx.cinvestav.Declarations.{NodeContext, User}
 import mx.cinvestav.Helpers
 import mx.cinvestav.commons.events.{EventX, EventXOps, Get, Put, PutCompleted}
 import mx.cinvestav.commons.types.{DumbObject, Monitoring, NodeX}
 import mx.cinvestav.events.Events
+//
 import org.http4s.dsl.io._
 import org.http4s.{AuthedRequest, AuthedRoutes, Header, Headers, Response}
 import org.typelevel.ci.CIString
@@ -83,14 +86,21 @@ object DownloadControllerV2 {
       subsetNodes           = locations.traverse(arMap.get).get.toNel.get
       _                     <- ctx.logger.debug(s"LOCATIONS $objectId $locations")
 //    ___________________________________________________
-      maybeSelectedNode     = if(subsetNodes.length ==1) subsetNodes.head.some else Events.balanceByReplica(
-        downloadBalancerToken,
-        objectSize = objectSize)(
-        objectId = objectId,
-        arMap = subsetNodes.map(x=>x.nodeId->x).toList.toMap,
-        events=events,
-        infos = infos
-      )
+      maybeSelectedNode     = if(subsetNodes.length ==1) subsetNodes.head.some
+      else ctx.config.downloadLoadBalancer match {
+        case "ROUND_ROBIN"   => None
+        case "PSEUDO_RANDOM" => None
+        case "TWO_CHOICES"   => None
+        case "SORTING_UF"    => None
+      }
+//        Events.balanceByReplica(
+//        downloadBalancerToken,
+//        objectSize = objectSize)(
+//        objectId = objectId,
+//        arMap = subsetNodes.map(x=>x.nodeId->x).toList.toMap,
+//        events=events,
+//        infos = infos
+//      )
       _ <- ctx.logger.debug(s"SELECTED_NODE $maybeSelectedNode")
       response              <- maybeSelectedNode match {
         case Some(selectedNode) => for {
@@ -141,17 +151,18 @@ object DownloadControllerV2 {
     } yield response
   }
   //  ____________________________________________________________________
-  def download(operationId:String)(objectId:String, authReq:AuthedRequest[IO,User], user:User)(implicit ctx:NodeContext) = for {
+  def download(operationId:String)(dumbObject: DumbObject, authReq:AuthedRequest[IO,User], user:User)(implicit ctx:NodeContext) = for {
     arrivalTime       <- IO.realTime.map(_.toMillis)
     arrivalTimeNanos  <- IO.monotonic.map(_.toNanos)
     currentState      <- ctx.state.get
+    req               = authReq.req
+    objectId          = dumbObject.objectId
+    objectSize        = dumbObject.objectSize
     rawEvents         = currentState.events
     events            = Events.orderAndFilterEventsMonotonicV2(rawEvents)
     schema            = Events.generateDistributionSchema(events = events)
-    arMap             = EventXOps.getAllNodeXs(events = events).map(x=>x.nodeId->x).toMap
+    arMap             = EventXOps.getAllNodeXs(events = events,objectSize = objectSize).map(x=>x.nodeId->x).toMap
     maybeLocations    = schema.get(objectId)
-    req               = authReq.req
-    objectSize        = req.headers.get(CIString("Object-Size")).map(_.head.value).flatMap(_.toLongOption).getOrElse(0L)
     preDownloadParams = PreDownloadParams(
         events                   = events,
         arrivalTimeNanos         = arrivalTimeNanos,
@@ -209,13 +220,13 @@ object DownloadControllerV2 {
 //      case None              => notFound(operationId)(preDownloadParams)
 //    }
   } yield ()
-  def apply(sDownload:Semaphore[IO])(implicit ctx:NodeContext) = {
+  def apply(s:Semaphore[IO])(implicit ctx:NodeContext) = {
 
     AuthedRoutes.of[User,IO]{
       case authReq@GET -> Root / "downloads" / operationId as user => for {
         serviceTimeStart   <- IO.monotonic.map(_.toNanos)
         now                <- IO.realTime.map(_.toNanos)
-        _                  <- sDownload.acquire
+        _                  <- s.acquire
         headers            = authReq.req.headers
         operationId        = headers.get(CIString("Operation-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
         objectSize         = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(0L)
@@ -255,23 +266,24 @@ object DownloadControllerV2 {
           )
         )
         _ <- ctx.logger.debug("____________________________________________________")
-        _                  <- sDownload.release
+        _                  <- s.release
       } yield newResponse
 //    }
       case authReq@GET -> Root / "download" / objectId as user =>
         val monotonic = IO.monotonic.map(_.toNanos)
         val realTime  = IO.realTime.map(_.toNanos)
         for {
+          _                  <- s.acquire
         serviceTimeStart   <- monotonic
         now                <- realTime
-        _                  <- sDownload.acquire
         headers            = authReq.req.headers
         operationId        = headers.get(CIString("Operation-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
         objectSize         = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(0L)
+          dumbObject       = DumbObject(objectId = objectId, objectSize = objectSize)
 //      _________________________________________________________________________
-        waitingTime        <- monotonic.map(_ - serviceTimeStart)
+//        waitingTime        <- monotonic.map(_ - serviceTimeStart)
 //      ________________________________________________________________________
-        response           <- download(operationId)(objectId,authReq,user)
+        response           <- download(operationId)(dumbObject = dumbObject,authReq,user)
 //      _______________________________________________________________________
         headers            = response.headers
       selectedNodeId       = headers.get(CIString("Node-Id")).map(_.head.value).getOrElse("")
@@ -295,14 +307,14 @@ object DownloadControllerV2 {
         _                  <- ctx.logger.info(s"DOWNLOAD $objectId $selectedNodeId $serviceTime $operationId")
         newResponse        = response.putHeaders(
           Headers(
-            Header.Raw(CIString("Waiting-Time"),waitingTime.toString),
+//            Header.Raw(CIString("Waiting-Time"),waitingTime.toString),
             Header.Raw(CIString("Service-Time"),serviceTime.toString),
             Header.Raw(CIString("Service-Time-Start"),serviceTimeStart.toString),
             Header.Raw(CIString("Service-Time-End"),serviceTimeEnd.toString),
           )
         )
         _                  <- ctx.logger.debug("____________________________________________________")
-        _                  <- sDownload.release
+        _                  <- s.release
       } yield newResponse
     }
 
