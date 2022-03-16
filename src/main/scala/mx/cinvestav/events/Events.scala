@@ -3,7 +3,7 @@ package mx.cinvestav.events
 import cats.data.NonEmptyList
 import cats.implicits._
 import cats.effect._
-import mx.cinvestav.commons.events.{Del, PutCompleted, UpdatedNodePort}
+import mx.cinvestav.commons.events.{Del, GetCompleted, PutCompleted, UpdatedNodePort}
 import mx.cinvestav.commons.types.Monitoring
 
 import java.util.UUID
@@ -214,9 +214,9 @@ object Events {
   }
 //
 
-  def getAndPutsByNode(events:List[EventX]): Map[String, List[EventX]] = {
+  def getCompletedAndPutCompletedByNode(events:List[EventX]): Map[String, List[EventX]] = {
     val getsAndPuts:List[EventX] = events.filter{
-      case _:Get | _:Put => true
+      case _:GetCompleted | _:PutCompleted => true
       case _             => false
     }
     getsAndPuts.groupBy(_.nodeId)
@@ -224,7 +224,7 @@ object Events {
 
 
   def getAvgServiceTimeByNode(events:List[EventX]): Map[String, Double] = {
-    getAndPutsByNode(events=events)
+    getCompletedAndPutCompletedByNode(events=events)
       .map{
         case (nodeId, operations) =>
           nodeId -> avgServiceTime(operations)
@@ -582,21 +582,21 @@ object Events {
     val objectsIds                = getObjectIds(events = events)
     val downloadObjectInitCounter = objectsIds.map(x=> x -> 0).toMap
    val filtered =  events.filter{
-      case e@(_:Get | _:SetDownloads) => e.monotonicTimestamp > windowTime
+      case e@(_:GetCompleted | _:SetDownloads) => e.monotonicTimestamp > windowTime
 //        || e.monotonicTimestamp > windowTime
 //      case _:Get | _:SetDownloads => true
       case _ => false
     }.foldLeft(List.empty[EventX]){
      case (_events,currentEvent)=> currentEvent match {
        case st:SetDownloads => _events.filterNot{
-         case d:Get =>d.nodeId ==st.nodeId && d.timestamp < st.timestamp && d.objectId == st.objectId
+         case d:GetCompleted =>d.nodeId ==st.nodeId && d.timestamp < st.timestamp && d.objectId == st.objectId
          case d:SetDownloads =>d.nodeId ==st.nodeId && d.timestamp < st.timestamp && d.objectId == st.objectId
          case _=> false
        } :+ st
        case d:Get => _events :+ d
      }
    }.map{
-     case d:Get => Map(d.nodeId -> Map(d.objectId -> 1)  )
+     case d:GetCompleted => Map(d.nodeId -> Map(d.objectId -> 1)  )
      case st: SetDownloads => Map(st.nodeId -> Map(st.objectId -> st.counter)  )
    }.foldLeft(Map.empty[String,Map[String,Int]  ])(_ |+| _)
      .map{
@@ -607,10 +607,10 @@ object Events {
 
   def getGlobalHitRatio(events:List[EventX]): Map[String, Map[String, Double]] = {
      events.filter{
-      case _:Get | _:Missed => true
+      case _:GetCompleted | _:Missed => true
       case _ => false
     }.map{
-      case d:Get =>
+      case d:GetCompleted =>
         Map(d.nodeId->
           Map("hits"-> 1.0 , "miss" -> 0.0 ,"hitRatio"-> 0.0)
         )
@@ -683,7 +683,10 @@ object Events {
   def getHitCounterByNode(events:List[EventX]): Map[String, Map[String, Int]] = {
     val objectsIds                = getObjectIds(events = events)
     val downloadObjectInitCounter = objectsIds.map(x=> (x -> 0)).toMap
-    Events.onlyGets(events = events).map(_.asInstanceOf[Get]).map{ e=>
+
+
+    EventXOps.onlyGetCompleteds(events = events).map(_.asInstanceOf[GetCompleted]).map{ e=>
+//      Events.onlyGets(events = events).map(_.asInstanceOf[Get]).map{ e=>
       Map(e.nodeId -> Map(e.objectId -> 1)  )
     }
       .foldLeft(Map.empty[String,Map[String,Int]  ])(_ |+| _)
@@ -751,7 +754,9 @@ object Events {
 //    x(::,*)
   }
 
-  def getObjectIds(events:List[EventX]): List[String] = Events.onlyPutos(events = events).map(_.asInstanceOf[Put]).map(_.objectId).distinct
+  def getObjectIds(events:List[EventX]): List[String] =
+    EventXOps.onlyPutCompleteds(events = events).map(_.asInstanceOf[PutCompleted]).map(_.objectId).distinct
+//  Events.onlyPutos(events = events).map(_.asInstanceOf[Put]).map(_.objectId).distinct
 
   def getDumbObject(events:List[EventX]): List[DumbObject] = Events.onlyPutos(events = events)
     .map(_.asInstanceOf[Put]).map{
@@ -761,7 +766,7 @@ object Events {
 
 
   def generateDistributionSchema(events:List[EventX]): Map[String, List[String]] =
-    Events.onlyPutos(events = events).map(_.asInstanceOf[Put]).map{ up=>
+    EventXOps.onlyPutCompleteds(events = events).map(_.asInstanceOf[PutCompleted]).map{ up=>
       Map(up.objectId -> List(up.nodeId))
     }.foldLeft(Map.empty[String,List[String]])(_ |+| _)
 

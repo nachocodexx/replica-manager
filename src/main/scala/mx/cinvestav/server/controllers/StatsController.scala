@@ -3,6 +3,7 @@ package mx.cinvestav.server.controllers
 import cats.implicits._
 import cats.effect._
 import mx.cinvestav.commons.events.{EventXOps, UpdatedNodePort}
+import org.typelevel.ci.CIString
 
 import scala.collection.immutable.ListMap
 //
@@ -24,17 +25,19 @@ object StatsController {
   def apply()(implicit ctx:NodeContext): HttpRoutes[IO] = {
 
     HttpRoutes.of[IO]{
-      case GET -> Root / "stats" => for {
+      case GET -> Root / "stats" =>
+        val program = for {
         currentState       <- ctx.state.get
         rawEvents          = currentState.events
         events             = Events.orderAndFilterEventsMonotonicV2(events = rawEvents)
+//        events             = EventXOps.(events = rawEvents)
         ars                = EventXOps.getAllNodeXs(events=events).map { node =>
               val nodeId = node.nodeId
               val publicPort = Events.getPublicPort(events= events,nodeId).map(_.publicPort).getOrElse(6666)
             node.copy(
               metadata = node.metadata ++ Map("PUBLIC_PORT"->publicPort.toString)
             )
-          }
+        }
         distributionSchema = Events.generateDistributionSchema(events = events)
         objectsIds         = Events.getObjectIds(events = events)
         hitCounter         = Events.getHitCounterByNode(events = events)
@@ -70,6 +73,13 @@ object StatsController {
         )
         response <- Ok(stats)
       } yield response
+
+        program.handleErrorWith{ e =>
+          val errorMsg = e.getMessage()
+          val headers  = Headers(Header.Raw(CIString("Error-Message"), errorMsg ) )
+
+          ctx.logger.error(errorMsg) *> InternalServerError(errorMsg,headers)
+        }
     }
 
   }

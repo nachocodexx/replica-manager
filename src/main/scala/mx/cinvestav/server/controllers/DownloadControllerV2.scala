@@ -1,24 +1,24 @@
 package mx.cinvestav.server.controllers
 
+import cats.data.NonEmptyList
 import cats.effect._
 import cats.effect.std.Semaphore
 import cats.implicits._
+import mx.cinvestav.commons.types.BalanceResponse
 //
 import mx.cinvestav.commons.balancer.{deterministic,nondeterministic}
 import mx.cinvestav.Declarations.{NodeContext, User}
-import mx.cinvestav.Helpers
 import mx.cinvestav.commons.events.{EventX, EventXOps, Get, Put, PutCompleted}
 import mx.cinvestav.commons.types.{DumbObject, Monitoring, NodeX}
 import mx.cinvestav.events.Events
 //
 import org.http4s.dsl.io._
 import org.http4s.{AuthedRequest, AuthedRoutes, Header, Headers, Response}
+import org.http4s.circe.CirceEntityEncoder._
+import io.circe.syntax._
+import io.circe.generic.auto._
 import org.typelevel.ci.CIString
-import retry.{RetryDetails, RetryPolicies, retryingOnAllErrors}
-
 import java.util.UUID
-//import
-//
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
@@ -37,7 +37,7 @@ object DownloadControllerV2 {
                               )
 
   //  ____________________________________________________________________
-  def processSelectedNode(objectId:String)(events:List[EventX],maybeSelectedNode:Option[NodeX])(implicit ctx:NodeContext): IO[Response[IO]] = {
+  def processSelectedNode(operationId:String,objectId:String)(events:List[EventX],maybeSelectedNode:Option[NodeX])(implicit ctx:NodeContext): IO[Response[IO]] = {
      maybeSelectedNode match {
       case Some(selectedNode) => for {
         _                   <- IO.unit
@@ -48,15 +48,30 @@ object DownloadControllerV2 {
 
         newResponse         <- maybePublicPort match {
           case Some((publicPort,ipAddress))=> for {
-            _                <- IO.unit
-            apiVersion       = s"v${ctx.config.apiVersion}"
-            usedPort         = if(ctx.config.usePublicPort) publicPort else "6666"
-//            ipAddress        = selectedNode.ip
-            nodeUri          = if(ctx.config.returnHostname) s"http://$selectedNodeId:$usedPort/api/$apiVersion/download/$objectId" else  s"http://$ipAddress:$usedPort/api/$apiVersion/download/$objectId"
-            res              <- Ok(
-              nodeUri,
+            _               <- IO.unit
+            usePublicPort   = ctx.config.usePublicPort
+            usedPort        = if(!usePublicPort) "6666" else publicPort.toString
+            apiVersionNum   = ctx.config.apiVersion
+            apiVersion      = s"v$apiVersionNum"
+            nodeUri         = if(ctx.config.returnHostname) s"http://$selectedNodeId:$usedPort/api/$apiVersion/download/$objectId" else  s"http://$ipAddress:$usedPort/api/$apiVersion/download/$objectId"
+            returnHostname  = ctx.config.returnHostname
+            timestamp       <- IO.realTime.map(_.toMillis)
+            balanceResponse = BalanceResponse(
+              nodeId       = selectedNodeId,
+              dockerPort  = 6666,
+              publicPort  = publicPort,
+              internalIp  = ipAddress,
+              timestamp   = timestamp,
+              apiVersion  = apiVersionNum,
+              dockerURL   = nodeUri,
+              operationId = operationId,
+              objectId    = objectId,
+              ufs         = selectedNode.ufs
+            )
+            res             <- Ok(
+              balanceResponse.asJson,
               Headers(
-                Header.Raw(CIString("Node-Id"),selectedNode.nodeId),
+                Header.Raw(CIString("Node-Id"),selectedNodeId),
                 Header.Raw(CIString("Public-Port"),publicPort.toString),
               )
             )
@@ -73,8 +88,9 @@ object DownloadControllerV2 {
   def success(operationId:String,locations:List[String])(x: PreDownloadParams)(implicit ctx:NodeContext) = {
     for {
       _                     <- IO.unit
-//    __________________________________________________
+      //    __________________________________________________
       events                = x.events
+      gets                  = EventXOps.onlyGetCompleteds(events = events)
       arrivalTimeNanos      = x.arrivalTimeNanos
       arrivalTime           = x.arrivalTime
       userId                = x.userId
@@ -85,29 +101,37 @@ object DownloadControllerV2 {
       infos                 = x.infos
       subsetNodes           = locations.traverse(arMap.get).get.toNel.get
       _                     <- ctx.logger.debug(s"LOCATIONS $objectId $locations")
-//    ___________________________________________________
+      locationNodeIds       = NonEmptyList.fromListUnsafe(locations)
+      locationNodes         = locations.map(arMap)
+      locationUfs           = locationNodes.map(_.ufs)
+      //    ___________________________________________________
       maybeSelectedNode     = if(subsetNodes.length ==1) subsetNodes.head.some
       else ctx.config.downloadLoadBalancer match {
-        case "ROUND_ROBIN"   => None
-        case "PSEUDO_RANDOM" => None
-        case "TWO_CHOICES"   => None
-        case "SORTING_UF"    => None
+        case "ROUND_ROBIN"   =>
+          val counter = gets.groupBy(_.nodeId).map(x=> x._1-> x._2.length)
+          val selectedNodeId = deterministic.RoundRobin(nodeIds = locationNodeIds)
+            .balanceWith(nodeIds = locationNodeIds,counter = counter)
+          arMap.get(selectedNodeId)
+        case "PSEUDO_RANDOM" =>
+          val selectedNodeId = deterministic.PseudoRandom(nodeIds = locationNodeIds).balance
+          arMap.get(selectedNodeId)
+        case "TWO_CHOICES"   =>
+          val psrnd               = deterministic.PseudoRandom(nodeIds = locationNodeIds)
+          val maybeSelectedNodeId = nondeterministic.TwoChoices(psrnd = psrnd)
+            .balances(ufs =  locationUfs,mapUf = _.memoryUF)
+            .headOption
+          maybeSelectedNodeId.flatMap(arMap.get)
+        case "SORTING_UF" =>
+          val maybeSelectedNodeId = nondeterministic.SortingUF()
+            .balance(ufs = locationUfs,mapUf = _.memoryUF)
+            .headOption
+          maybeSelectedNodeId.flatMap(arMap.get)
       }
-//        Events.balanceByReplica(
-//        downloadBalancerToken,
-//        objectSize = objectSize)(
-//        objectId = objectId,
-//        arMap = subsetNodes.map(x=>x.nodeId->x).toList.toMap,
-//        events=events,
-//        infos = infos
-//      )
-      _ <- ctx.logger.debug(s"SELECTED_NODE $maybeSelectedNode")
+      _                     <- ctx.logger.debug(s"SELECTED_NODE $maybeSelectedNode")
       response              <- maybeSelectedNode match {
         case Some(selectedNode) => for {
           _                  <- IO.unit
-          serviceTimeNanos   <- IO.monotonic.map(_.toNanos).map(_ - arrivalTimeNanos)
-          selectedNodeId     = selectedNode.nodeId
-          newResponse        <- processSelectedNode(objectId)(events, maybeSelectedNode)
+          newResponse        <- processSelectedNode(operationId = operationId,objectId = objectId)(events, maybeSelectedNode)
         } yield newResponse
         case None =>
           ctx.logger.error("NO_SELECTED_NODE_SUCCESS") *> Forbidden()
@@ -144,7 +168,7 @@ object DownloadControllerV2 {
           } yield maybeSelectedNode
           else nodesWithAvailablePages.maxByOption(_.availableCacheSize).pure[IO]
 //        _________________________________________________________________________
-          response <- processSelectedNode(objectId)(events, maybeSelectedNode)
+          response <- processSelectedNode(operationId = operationId,objectId = objectId)(events, maybeSelectedNode)
         } yield response
       }
       else NotFound() <* ctx.errorLogger.debug(s"NOT_FOUND $operationId $objectId")
@@ -220,6 +244,8 @@ object DownloadControllerV2 {
 //      case None              => notFound(operationId)(preDownloadParams)
 //    }
   } yield ()
+
+
   def apply(s:Semaphore[IO])(implicit ctx:NodeContext) = {
 
     AuthedRoutes.of[User,IO]{
@@ -234,7 +260,8 @@ object DownloadControllerV2 {
         //
         waitingTime        <- IO.monotonic.map(_.toNanos).map(_ - serviceTimeStart)
         //      ________________________________________________________________
-//        response           <- download(operationId)(operationId,authReq,user)
+//        dumbObject         = DumbObject(objectId = objectId, objectSize = objectSize)
+//        response           <- download(operationId)(dumbObject =dumbObject ,authReq,user)
         response          <- Ok()
         //      ________________________________________________________________
         headers            = response.headers
@@ -273,7 +300,7 @@ object DownloadControllerV2 {
         val monotonic = IO.monotonic.map(_.toNanos)
         val realTime  = IO.realTime.map(_.toNanos)
         for {
-          _                  <- s.acquire
+          _                <- s.acquire
         serviceTimeStart   <- monotonic
         now                <- realTime
         headers            = authReq.req.headers
@@ -281,7 +308,7 @@ object DownloadControllerV2 {
         objectSize         = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(0L)
           dumbObject       = DumbObject(objectId = objectId, objectSize = objectSize)
 //      _________________________________________________________________________
-//        waitingTime        <- monotonic.map(_ - serviceTimeStart)
+        waitingTime        <- monotonic.map(_ - serviceTimeStart)
 //      ________________________________________________________________________
         response           <- download(operationId)(dumbObject = dumbObject,authReq,user)
 //      _______________________________________________________________________
@@ -307,7 +334,7 @@ object DownloadControllerV2 {
         _                  <- ctx.logger.info(s"DOWNLOAD $objectId $selectedNodeId $serviceTime $operationId")
         newResponse        = response.putHeaders(
           Headers(
-//            Header.Raw(CIString("Waiting-Time"),waitingTime.toString),
+            Header.Raw(CIString("Waiting-Time"),waitingTime.toString),
             Header.Raw(CIString("Service-Time"),serviceTime.toString),
             Header.Raw(CIString("Service-Time-Start"),serviceTimeStart.toString),
             Header.Raw(CIString("Service-Time-End"),serviceTimeEnd.toString),

@@ -225,7 +225,7 @@ object UploadControllerV2 {
           operationId        = headers.get(CIString("Operation-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
           objectId           = headers.get(CIString("Object-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
           objectSize         = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(0L)
-          fileExtension      = headers.get(CIString("File-Ext")).map(_head.value).getOrElse("")
+          fileExtension      = headers.get(CIString("File-Ext")).map(_.head.value).getOrElse("")
           filePath           = headers.get(CIString("File-Path")).map(_.head.value).getOrElse(s"$objectId.$fileExtension")
 //      ______________________________________________________________________________________________________________
           _                  <- ctx.logger.debug(s"ARRIVAL_TIME $objectId $serviceTimeStart")
