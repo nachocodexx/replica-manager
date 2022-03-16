@@ -6,7 +6,7 @@ import cats.effect.IO
 import cats.effect.std.Semaphore
 import mx.cinvestav.commons.events.{Downloaded, Evicted, Missed, Uploaded}
 import mx.cinvestav.events.Events
-import mx.cinvestav.server.controllers.{AddNode, DownloadController, DownloadControllerV2, EventsControllers, EvictedController, MonitoringController, PutController, ResetController, SaveEventsController, StatsController, UpdateConfig, UpdatePublicPort, UploadContraoller, UploadControllerV2}
+import mx.cinvestav.server.controllers.{AddNode, CompletedUploadController, DownloadController, DownloadControllerV2, EventsControllers, EvictedController, MonitoringController, PutController, ResetController, SaveEventsController, StatsController, UpdateConfig, UpdatePublicPort, UploadContraoller, UploadControllerV2}
 import mx.cinvestav.server.middlewares.AuthMiddlewareX
 import org.http4s.server.middleware.CORS
 //
@@ -43,7 +43,7 @@ class HttpServer(sDownload:Semaphore[IO])(implicit ctx:NodeContext) {
   def basicOpsRoutes = AuthMiddlewareX(ctx)(DownloadControllerV2(sDownload) <+> UploadControllerV2(sDownload))
 
   def defaultRoutes =
-    UpdateConfig() <+> AddNode() <+> CORS(StatsController()) <+> CORS(EventsControllers())<+> CORS(SaveEventsController()) <+> ResetController() <+> PutController()<+>MonitoringController() <+> EvictedController() <+> UpdatePublicPort()
+   CompletedUploadController() <+> UpdateConfig() <+> AddNode() <+> CORS(StatsController()) <+> CORS(EventsControllers())<+> CORS(SaveEventsController()) <+> ResetController() <+> PutController()<+>MonitoringController() <+> EvictedController() <+> UpdatePublicPort()
 
   def httpApp: Kleisli[IO, Request[IO], Response[IO]] =
     Router[IO](

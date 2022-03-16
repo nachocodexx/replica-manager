@@ -208,28 +208,6 @@ object UploadControllerV2 {
   def apply(s:Semaphore[IO])(implicit ctx:NodeContext)={
     AuthedRoutes.of[User,IO]{
 //    __________________________________________________________________________________
-      case authReq@POST -> Root / "upload" / operationId / objectId as user =>
-        val program = for {
-          currentState <- ctx.state.get
-  //      ________________________________________________________________________
-          events       = Events.filterEventsMonotonicV2(events = currentState.events)
-          puts         = Events.onlyPutos(events = events).map(_.asInstanceOf[Put])
-          maybePut     = puts.find(p => p.correlationId == operationId && p.objectId == objectId)
-  //      ________________________________________________________________________
-          res          <- maybePut match {
-            case Some(put) => for {
-              res          <- NoContent()
-              completedPut = PutCompleted.fromPut(p = put)
-              _            <- Events.saveEvents(events = completedPut::Nil)
-            } yield res
-//          ________________________________________________________________________
-            case None => NotFound()
-          }
-        } yield res
-        program.handleErrorWith{ e =>
-          ctx.logger.error(e.getMessage) *> InternalServerError()
-        }
-//    __________________________________________________________________________________
       case authReq@POST -> Root / "upload" as user =>
         val defaultConvertion = (x:FiniteDuration) =>  x.toNanos
         val monotonic         = IO.monotonic.map(defaultConvertion)
