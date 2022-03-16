@@ -444,6 +444,14 @@ object Events {
               monotonicTimestamp = now,
               serialNumber = lastSerialNumber+index
             )
+            case x:UpdatedNetworkCfg => x.copy(
+              monotonicTimestamp = now,
+              serialNumber = lastSerialNumber+index
+            )
+            case x:PutCompleted => x.copy(
+              monotonicTimestamp = now,
+              serialNumber = lastSerialNumber+index
+            )
             case _ => event
           }
         } yield newEvent
@@ -493,6 +501,24 @@ object Events {
 
   def getObjectById(objectId:String,events:List[EventX]):Option[DumbObject] = onlyPutos(events=events).map(_.asInstanceOf[Put]).find(_.objectId == objectId)
     .map(x=>DumbObject(x.objectId,x.objectSize))
+
+  def isPending(objectId:String,events:List[EventX]) = {
+    !EventXOps.onlyPutCompleteds(events=events).map(_.asInstanceOf[PutCompleted])
+      .map(_.objectId).contains(objectId)
+  }
+  def getObjectByIdV3(objectId:String,events:List[EventX]):Option[DumbObject] ={
+    val x                  = EventXOps.onlyPendingPuts(events =events)
+      .map(_.asInstanceOf[Put])
+      .find(_.objectId == objectId)
+      .map(x=>DumbObject(x.objectId,x.objectSize))
+    x
+//    x.map(x=> (x,pending))
+//    val completedObjectIds = x.map(_.objectId)
+//    val y = EventXOps.onlyPendingPuts(events = events).map(_.asInstanceOf[Put])
+//    y
+//      .find(p =>completedObjectIds.contains(p.objectId))
+//      .map(x=>DumbObject(x.objectId,x.objectSize))
+  }
   def getObjectByIdV2(objectId:String,events:List[EventX]):Option[DumbObject] =
     EventXOps.onlyPutCompleteds(events=events)
     .map(_.asInstanceOf[PutCompleted]).find(_.objectId == objectId)

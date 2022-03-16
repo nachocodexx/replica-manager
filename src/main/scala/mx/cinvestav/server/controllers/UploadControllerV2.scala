@@ -39,23 +39,24 @@ object UploadControllerV2 {
 
   def alreadyUploaded(o:DumbObject,events:List[EventX])(implicit ctx:NodeContext) = {
     for {
-      _     <- IO.unit
-      res   <- Events.generateDistributionSchema(events = events).get(o.objectId) match {
-        case Some(nodes) => for {
-          _     <- ctx.logger.debug(s"${o.objectId} ALREADY UPLOADED")
-          node = Events.getNodeById(events=events,nodeId = nodes.head).get
-          x = if(ctx.config.returnHostname) s"http://${node.nodeId}:6666" else  node.httpUrl
-          nodeUri = s"$x/api/v2/upload"
-
-          res <- Ok(nodeUri,Headers(
-            Header.Raw(CIString("Already-Uploaded"),"true"),
-            Header.Raw(CIString("Node-Id"),node.nodeId),
-            Header.Raw(CIString("Object-Size"),o.objectSize.toString),
-            Header.Raw(CIString("Download-Url"),s"$x/api/v6/download/${o.objectId}"),
-          ))
-        } yield res
-        case None => ctx.logger.debug("NO DISTRIBUTION SCHEMA")*> NotFound()
-      }
+      _    <- ctx.logger.debug(s"PUT_PENDING ${o.objectId}")
+      res  <- Accepted()
+//      res   <- Events.generateDistributionSchema(events = events).get(o.objectId) match {
+//        case Some(nodes) => for {
+//          _     <- ctx.logger.debug(s"${o.objectId} ALREADY UPLOADED")
+//          node = Events.getNodeById(events=events,nodeId = nodes.head).get
+//          x = if(ctx.config.returnHostname) s"http://${node.nodeId}:6666" else  node.httpUrl
+//          nodeUri = s"$x/api/v2/upload"
+//
+//          res <- Ok(nodeUri,Headers(
+//            Header.Raw(CIString("Already-Uploaded"),"true"),
+//            Header.Raw(CIString("Node-Id"),node.nodeId),
+//            Header.Raw(CIString("Object-Size"),o.objectSize.toString),
+//            Header.Raw(CIString("Download-Url"),s"$x/api/v6/download/${o.objectId}"),
+//          ))
+//        } yield res
+//        case None => ctx.logger.debug("NO DISTRIBUTION SCHEMA")*> NotFound()
+//      }
     } yield res
   }
 
@@ -170,7 +171,7 @@ object UploadControllerV2 {
       currentState       <- ctx.state.get
       req                = authReq.req
       headers            = req.headers
-      maybeObject        = Events.getObjectByIdV2(objectId = objectId,events=events)
+      maybeObject        = Events.getObjectByIdV3(objectId = objectId,events=events)
       objectSize         = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(0L)
       arMap              = ctx.config.uploadLoadBalancer match {
         case "SORTING_UF" | "TWO_CHOICES" => EventXOps.getAllNodeXs(
