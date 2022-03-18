@@ -133,10 +133,12 @@ object Events {
       case _:UpdatedNetworkCfg => true
       case _=> false
     }
+
   def getPublicPort(events:List[EventX],nodeId:String): Option[UpdatedNetworkCfg] = onlyUpdatedPublicPort(events=events)
     .map(_.asInstanceOf[UpdatedNetworkCfg])
     .find(_.nodeId == nodeId)
-//  Get interval downloads
+
+
   def getDownloadsByIntervalByObjectId(objectId:String)(period:FiniteDuration)(events:List[EventX]) = {
     val es = onlyGets(events=events).map(_.asInstanceOf[Get]).filter(_.objectId == objectId).map(_.asInstanceOf[EventX])
     Events.getDownloadsByInterval(period)(events=es).map(_.length)
@@ -244,42 +246,7 @@ object Events {
 //    val firstEvent = events.
 
   }
-//  def
 
-//
-
-//  def calculateMemoryUFByNode(events:List[EventX],objectSize:Long): Map[String, Double] = {
-//    val nodes = getAllNodeXs(events = events).map(x=>x.nodeId->x).toMap
-//    val initNodesUFs = nodes.map{
-//      case (nodeId, _) => nodeId->0.0
-//    }
-//   initNodesUFs |+| events.filter{
-//      case _:Get | _:GetInProgress => true
-//      case _ => false
-//    }.groupBy(_.nodeId).map{
-//      case (nodeId, events) =>  nodeId ->
-//        events.groupBy(_.correlationId)
-//          .map{
-//            case (_, es) if es.length==1  => es.map{
-//              case x:GetInProgress => x.objectSize
-//              case  _ => 0
-//            }.sum
-//            case (_,_) => 0
-//          }.sum
-//    }.map{
-//      case (nodeId, usedMemory) =>
-//        val maybeNode = nodes.get(nodeId)
-//        maybeNode match {
-//          case Some(node) => node.nodeId -> UF.calculate(
-//            total = node.totalMemoryCapacity,
-//            used = objectSize+usedMemory ,
-//            objectSize = objectSize
-//          )
-//          case None => ""->1.0
-//        }
-//    }
-//      .filter(_._1.nonEmpty)
-//  }
 
   def getNodeById(nodeId:String,events:List[EventX]): Option[NodeX] = {
     getAllNodeXs(events=events).find(_.nodeId == nodeId)
@@ -287,8 +254,6 @@ object Events {
   def getNodesByIsd(nodeIds:List[String],events:List[EventX]): List[NodeX] =
     getAllNodeXs(events=events).filter(x=>nodeIds.contains(x.nodeId))
 
-  //
-//
  def getReplicaCounter (guid:String,events:List[EventX],arMap:Map[String,NodeX]) = {
   val definedAt = Events.getHitCounterByNode(events = events).filter{
     case (nodeId, value) => value.contains(guid) && arMap.contains(nodeId)
@@ -506,10 +471,10 @@ object Events {
     !EventXOps.onlyPutCompleteds(events=events).map(_.asInstanceOf[PutCompleted])
       .map(_.objectId).contains(objectId)
   }
-  def getObjectByIdV3(objectId:String,events:List[EventX]):Option[DumbObject] ={
+  def getObjectByIdV3(objectId:String,operationId:String,events:List[EventX]):Option[DumbObject] ={
     val x                  = EventXOps.onlyPendingPuts(events =events)
       .map(_.asInstanceOf[Put])
-      .find(_.objectId == objectId)
+      .find(x=> x.objectId == objectId && x.correlationId == operationId )
       .map(x=>DumbObject(x.objectId,x.objectSize))
     x
 //    x.map(x=> (x,pending))
@@ -544,6 +509,10 @@ object Events {
   }
 //
 
+  def getReplicasByObjectId(events:List[EventX],objectId:String) ={
+    val puts = EventXOps.onlyPuts(events = events).map(_.asInstanceOf[Put])
+    puts.filter(_.objectId == objectId).map(_.nodeId)
+  }
   def onlyPutsAndGets(events:List[EventX])  = events.filter{
       case _:Put => true
       case _:Get => true

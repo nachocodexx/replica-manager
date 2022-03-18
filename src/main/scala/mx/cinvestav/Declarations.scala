@@ -9,7 +9,7 @@ import mx.cinvestav.commons.status.Status
 import mx.cinvestav.config.{DefaultConfig, NodeInfo}
 import mx.cinvestav.commons.types.{NodeUFs, NodeX}
 import mx.cinvestav.commons.balancer.v3.{Balancer => BalancerV3}
-import mx.cinvestav.commons.events.{AddedNode, Del, Downloaded, EventX, Evicted, Get, Missed, ObjectHashing, Push, Put, RemovedNode, Replicated, UpdatedNodePort, Uploaded, Pull => PullEvent, TransferredTemperature => SetDownloads}
+import mx.cinvestav.commons.events.{AddedNode, Del, Downloaded, EventX, Evicted, Get, GetCompleted, Missed, ObjectHashing, Push, Put, PutCompleted, RemovedNode, Replicated, UpdatedNodePort, Uploaded, Pull => PullEvent, TransferredTemperature => SetDownloads}
 import mx.cinvestav.events.Events.{GetInProgress, HotObject, MeasuredServiceTime, MonitoringStats, UpdatedNetworkCfg}
 import org.http4s.blaze.client.BlazeClientBuilder
 import org.http4s.client.Client
@@ -56,6 +56,9 @@ object Declarations {
           case "HOT_OBJECT" => hCursor.as[HotObject]
           case "MONITORING_STATS" => hCursor.as[MonitoringStats]
           case "UPDATED_PUBLIC_PORT" => hCursor.as[UpdatedNetworkCfg]
+          case "PUT_COMPLETED" => hCursor.as[PutCompleted]
+          case "GET_COMPLETED" => hCursor.as[GetCompleted]
+
         }
       } yield decoded
     }
@@ -80,6 +83,8 @@ object Declarations {
       case hot:HotObject => hot.asJson
       case hot:MonitoringStats => hot.asJson
       case hot:UpdatedNetworkCfg => hot.asJson
+      case hot:PutCompleted => hot.asJson
+      case hot:GetCompleted => hot.asJson
 
     }
   }

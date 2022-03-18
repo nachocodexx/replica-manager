@@ -41,22 +41,6 @@ object UploadControllerV2 {
     for {
       _    <- ctx.logger.debug(s"PUT_PENDING ${o.objectId}")
       res  <- Accepted()
-//      res   <- Events.generateDistributionSchema(events = events).get(o.objectId) match {
-//        case Some(nodes) => for {
-//          _     <- ctx.logger.debug(s"${o.objectId} ALREADY UPLOADED")
-//          node = Events.getNodeById(events=events,nodeId = nodes.head).get
-//          x = if(ctx.config.returnHostname) s"http://${node.nodeId}:6666" else  node.httpUrl
-//          nodeUri = s"$x/api/v2/upload"
-//
-//          res <- Ok(nodeUri,Headers(
-//            Header.Raw(CIString("Already-Uploaded"),"true"),
-//            Header.Raw(CIString("Node-Id"),node.nodeId),
-//            Header.Raw(CIString("Object-Size"),o.objectSize.toString),
-//            Header.Raw(CIString("Download-Url"),s"$x/api/v6/download/${o.objectId}"),
-//          ))
-//        } yield res
-//        case None => ctx.logger.debug("NO DISTRIBUTION SCHEMA")*> NotFound()
-//      }
     } yield res
   }
 
@@ -67,28 +51,29 @@ object UploadControllerV2 {
     events:List[EventX],
     nodes:NonEmptyList[NodeX],
     rf:Int = 1
-//    impactFactor:Double
-    
   )(implicit ctx:NodeContext) = {
     for {
       _                  <- IO.unit
-      nodeIds             = nodes.map(_.nodeId)
-      ufs                 = nodes.map(_.ufs).toList
-      maybeSelectedNode = ctx.config.uploadLoadBalancer match {
+      nodeIds            = nodes.map(_.nodeId)
+      ufs                = nodes.map(_.ufs).toList
+      filteredNodes      = nodes.filter(_.availableStorageCapacity >= objectSize)
+      filteredNodeIds    = filteredNodes.map(_.nodeId)
+      filteredUfs        = filteredNodes.map(_.ufs)
+
+      maybeSelectedNode =if(filteredNodes.isEmpty) Option.empty[List[NodeX]]  else ctx.config.uploadLoadBalancer match {
         case "SORTING_UF" =>
           val selectedNodeIds = nondeterministic.SortingUF()
-          .balance(ufs = ufs,takeN = rf)
+          .balance(ufs = filteredUfs,takeN = rf)
           val xs = selectedNodeIds.map(nodeId => nodes.find(_.nodeId == nodeId) ).sequence
           xs
         case "TWO_CHOICES" =>
           val selectedNodeIds = nondeterministic.TwoChoices(
-            psrnd = deterministic.PseudoRandom(nodeIds = nodeIds)
-          ).balances(ufs =ufs,takeN = rf)
+            psrnd = deterministic.PseudoRandom(nodeIds = NonEmptyList.fromListUnsafe(filteredNodeIds))
+          ).balances(ufs =filteredUfs,takeN = rf)
           val xs = selectedNodeIds.map(nodeId => nodes.find(_.nodeId == nodeId)).sequence
           xs
         case "PSEUDO_RANDOM" =>
-          val selectedNodeIds = deterministic.PseudoRandom(nodeIds = nodeIds.sorted)
-            .balanceReplicas(replicaNodes = Nil,takeN=rf)
+          val selectedNodeIds = deterministic.PseudoRandom(nodeIds = NonEmptyList.fromListUnsafe(filteredNodeIds)).balanceReplicas(replicaNodes = Nil,takeN=rf)
           val xs = selectedNodeIds.map(nodeId => nodes.find(_.nodeId == nodeId)).sequence
           xs
         case "ROUND_ROBIN" =>
@@ -171,8 +156,9 @@ object UploadControllerV2 {
       currentState       <- ctx.state.get
       req                = authReq.req
       headers            = req.headers
-      maybeObject        = Events.getObjectByIdV3(objectId = objectId,events=events)
       objectSize         = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(0L)
+
+      maybeObject        = Events.getObjectByIdV3(objectId = objectId,operationId =operationId ,events=events)
       arMap              = ctx.config.uploadLoadBalancer match {
         case "SORTING_UF" | "TWO_CHOICES" => EventXOps.getAllNodeXs(
           events     = rawEvents.sortBy(_.monotonicTimestamp),
@@ -185,21 +171,27 @@ object UploadControllerV2 {
       }
       //       NO EMPTY LIST OF RD's
       maybeARNodeX       = NonEmptyList.fromList(arMap.values.toList)
-      nN                  = arMap.size
+      nN                 = arMap.size
       impactFactor       = authReq.req.headers.get(CIString("Impact-Factor")).flatMap(_.head.value.toDoubleOption).getOrElse(1/nN.toDouble)
       //   _______________________________________________________________________________
       response           <- maybeObject match {
         case Some(o) => alreadyUploaded(o,events=events)
         case None => maybeARNodeX match {
 //          _________________________________________________
-            case Some(nodes) => commonCode(operationId)(
-              objectId   = objectId,
-              objectSize = objectSize,
-              userId     = user.id,
-              events     = events,
-              nodes      = nodes,
-              rf         = math.floor(impactFactor*nN).toInt
-            )
+            case Some(nodes) => for {
+              _             <- IO.unit
+              replicaNodes  =  Events.getReplicasByObjectId(events = events,objectId = objectId)
+              filteredNodes = nodes.filterNot(x=>replicaNodes.contains(x.nodeId))
+              res           <- if(filteredNodes.isEmpty) Accepted()
+              else commonCode(operationId)(
+                  objectId   = objectId,
+                  objectSize = objectSize,
+                  userId     = user.id,
+                  events     = events,
+                  nodes      = NonEmptyList.fromListUnsafe(filteredNodes),
+                  rf         = math.floor(impactFactor*nN).toInt
+                )
+            } yield res
 //          ____________________________________________________
             case None => ctx.logger.debug("NO_NODES,NO_LB") *> Forbidden()
           }
@@ -278,6 +270,7 @@ object UploadControllerV2 {
 //      ______________________________________________________________________________________
           newResponse        = response.putHeaders(
             Headers(
+              Header.Raw(CIString("Latency"),latency.toString),
               Header.Raw(CIString("Service-Time"),serviceTime.toString),
               Header.Raw(CIString("Service-Time-Start"), serviceTimeStart.toString),
               Header.Raw(CIString("Service-Time-End"), serviceTimeEnd.toString),

@@ -37,9 +37,8 @@ object DownloadControllerV2 {
                               )
 
   //  ____________________________________________________________________
-  def processSelectedNode(operationId:String,objectId:String)(events:List[EventX],maybeSelectedNode:Option[NodeX])(implicit ctx:NodeContext): IO[Response[IO]] = {
-     maybeSelectedNode match {
-      case Some(selectedNode) => for {
+  def processSelectedNode(operationId:String,objectId:String)(events:List[EventX],selectedNode:NodeX)(implicit ctx:NodeContext): IO[Response[IO]] = {
+      for {
         _                   <- IO.unit
         selectedNodeId      = selectedNode.nodeId
         maybePublicPort     = Events.getPublicPort(events,nodeId = selectedNodeId)
@@ -54,7 +53,7 @@ object DownloadControllerV2 {
             apiVersionNum   = ctx.config.apiVersion
             apiVersion      = s"v$apiVersionNum"
             nodeUri         = if(ctx.config.returnHostname) s"http://$selectedNodeId:$usedPort/api/$apiVersion/download/$objectId" else  s"http://$ipAddress:$usedPort/api/$apiVersion/download/$objectId"
-            returnHostname  = ctx.config.returnHostname
+//            returnHostname  = ctx.config.returnHostname
             timestamp       <- IO.realTime.map(_.toMillis)
             balanceResponse = BalanceResponse(
               nodeId       = selectedNodeId,
@@ -80,61 +79,63 @@ object DownloadControllerV2 {
             ctx.logger.error("NO_PUBLIC_PORT | NO_IP_ADDRESS") *> Forbidden()
         }
       } yield newResponse
-      case None =>
-       ctx.logger.error("NO_SELECTED_NODE") *> Forbidden()
-    }
   }
   //  ____________________________________________________________________
   def success(operationId:String,locations:List[String])(x: PreDownloadParams)(implicit ctx:NodeContext) = {
     for {
       _                     <- IO.unit
       //    __________________________________________________
-      events                = x.events
-      gets                  = EventXOps.onlyGetCompleteds(events = events)
-      arrivalTimeNanos      = x.arrivalTimeNanos
-      arrivalTime           = x.arrivalTime
-      userId                = x.userId
-      downloadBalancerToken = x.downloadBalancerToken
-      objectId              = x.objectId
-      objectSize            = x.objectSize
-      arMap                 = x.arMap
-      infos                 = x.infos
-      subsetNodes           = locations.traverse(arMap.get).get.toNel.get
-      _                     <- ctx.logger.debug(s"LOCATIONS $objectId $locations")
-      locationNodeIds       = NonEmptyList.fromListUnsafe(locations)
-      locationNodes         = locations.map(arMap)
-      locationUfs           = locationNodes.map(_.ufs)
-      //    ___________________________________________________
+      events                  = x.events
+      gets                    = EventXOps.onlyGetCompleteds(events = events)
+      arrivalTimeNanos        = x.arrivalTimeNanos
+      arrivalTime             = x.arrivalTime
+      userId                  = x.userId
+      downloadBalancerToken   = x.downloadBalancerToken
+      objectId                = x.objectId
+      objectSize              = x.objectSize
+      arMap                   = x.arMap
+      infos                   = x.infos
+      subsetNodes             = locations.traverse(arMap.get).get.toNel.get
+      _                       <- ctx.logger.debug(s"LOCATIONS $objectId $locations")
+      locationNodeIds         = NonEmptyList.fromListUnsafe(locations)
+      locationNodes           = locations.map(arMap)
+      locationUfs             = locationNodes.map(_.ufs)
+      filteredNodes           = locations.map(arMap).filter(_.availableMemoryCapacity >= objectSize)
+      filteredLocationNodeIds = filteredNodes.map(_.nodeId)
+      _locationNodeIds        = NonEmptyList.fromListUnsafe(filteredLocationNodeIds)
+      filteredLocationUfs     = locationNodes.map(_.ufs)
+      //      _____________________________________________________________________________________________________________________________________
       maybeSelectedNode     = if(subsetNodes.length ==1) subsetNodes.head.some
+      else if(filteredNodes.isEmpty) None
       else ctx.config.downloadLoadBalancer match {
         case "ROUND_ROBIN"   =>
-          val counter = gets.groupBy(_.nodeId).map(x=> x._1-> x._2.length)
-          val selectedNodeId = deterministic.RoundRobin(nodeIds = locationNodeIds)
-            .balanceWith(nodeIds = locationNodeIds,counter = counter)
-          arMap.get(selectedNodeId)
+            val counter          = gets.groupBy(_.nodeId).map(x=> x._1-> x._2.length).filter(x=> _locationNodeIds.contains_(x._1))
+            val selectedNodeId   = deterministic.RoundRobin(nodeIds = _locationNodeIds).balanceWith(nodeIds = _locationNodeIds,counter = counter)
+            arMap.get(selectedNodeId)
         case "PSEUDO_RANDOM" =>
-          val selectedNodeId = deterministic.PseudoRandom(nodeIds = locationNodeIds).balance
+          val selectedNodeId = deterministic.PseudoRandom(nodeIds = _locationNodeIds).balance
           arMap.get(selectedNodeId)
         case "TWO_CHOICES"   =>
-          val psrnd               = deterministic.PseudoRandom(nodeIds = locationNodeIds)
+          val psrnd               = deterministic.PseudoRandom(nodeIds = _locationNodeIds)
           val maybeSelectedNodeId = nondeterministic.TwoChoices(psrnd = psrnd)
-            .balances(ufs =  locationUfs,mapUf = _.memoryUF)
+            .balances(ufs =  filteredLocationUfs,mapUf = _.memoryUF)
             .headOption
           maybeSelectedNodeId.flatMap(arMap.get)
         case "SORTING_UF" =>
           val maybeSelectedNodeId = nondeterministic.SortingUF()
-            .balance(ufs = locationUfs,mapUf = _.memoryUF)
+            .balance(ufs = filteredLocationUfs,mapUf = _.memoryUF)
             .headOption
           maybeSelectedNodeId.flatMap(arMap.get)
       }
+      //      _____________________________________________________________________________________________________________________________________
       _                     <- ctx.logger.debug(s"SELECTED_NODE $maybeSelectedNode")
       response              <- maybeSelectedNode match {
         case Some(selectedNode) => for {
           _                  <- IO.unit
-          newResponse        <- processSelectedNode(operationId = operationId,objectId = objectId)(events, maybeSelectedNode)
+          newResponse        <- processSelectedNode(operationId = operationId,objectId = objectId)(events, selectedNode)
         } yield newResponse
-        case None =>
-          ctx.logger.error("NO_SELECTED_NODE_SUCCESS") *> Forbidden()
+        case None => Accepted()
+//          ctx.logger.error("NO_SELECTED_NODE_SUCCESS") *> Forbidden()
       }
     } yield response
   }
@@ -168,7 +169,10 @@ object DownloadControllerV2 {
           } yield maybeSelectedNode
           else nodesWithAvailablePages.maxByOption(_.availableCacheSize).pure[IO]
 //        _________________________________________________________________________
-          response <- processSelectedNode(operationId = operationId,objectId = objectId)(events, maybeSelectedNode)
+          response <- maybeSelectedNode match {
+            case Some(selectedNode) => processSelectedNode(operationId = operationId,objectId = objectId)(events, selectedNode)
+            case None => Accepted()
+          }
         } yield response
       }
       else NotFound() <* ctx.errorLogger.debug(s"NOT_FOUND $operationId $objectId")
@@ -176,34 +180,39 @@ object DownloadControllerV2 {
   }
   //  ____________________________________________________________________
   def download(operationId:String)(dumbObject: DumbObject, authReq:AuthedRequest[IO,User], user:User)(implicit ctx:NodeContext) = for {
-    arrivalTime       <- IO.realTime.map(_.toMillis)
-    arrivalTimeNanos  <- IO.monotonic.map(_.toNanos)
-    currentState      <- ctx.state.get
-    req               = authReq.req
-    objectId          = dumbObject.objectId
-    objectSize        = dumbObject.objectSize
-    rawEvents         = currentState.events
-    events            = Events.orderAndFilterEventsMonotonicV2(rawEvents)
-    schema            = Events.generateDistributionSchema(events = events)
-    arMap             = EventXOps.getAllNodeXs(events = events,objectSize = objectSize).map(x=>x.nodeId->x).toMap
-    maybeLocations    = schema.get(objectId)
-    preDownloadParams = PreDownloadParams(
-        events                   = events,
-        arrivalTimeNanos         = arrivalTimeNanos,
-        arrivalTime              = arrivalTime,
-        userId                   = user.id,
-        downloadBalancerToken    = currentState.downloadBalancerToken,
-        objectId                 = objectId,
-        objectSize               = objectSize,
-        arMap                    = arMap,
-        infos                    = currentState.infos,
-//        maxAR                    = 5,
-//        serviceReplicationDaemon = currentState.serviceReplicationDaemon
-      )
-    //    _____________________________________________________________________________________________________________________
-    response         <- maybeLocations match {
-        case (Some(locations)) => success(operationId,locations)(preDownloadParams)
-        case None              => notFound(operationId)(preDownloadParams)
+    arrivalTime          <- IO.realTime.map(_.toMillis)
+    arrivalTimeNanos     <- IO.monotonic.map(_.toNanos)
+    currentState         <- ctx.state.get
+    req                  = authReq.req
+    objectId             = dumbObject.objectId
+    objectSize           = dumbObject.objectSize
+    rawEvents            = currentState.events
+    events               = Events.orderAndFilterEventsMonotonicV2(rawEvents)
+    maybePendingDownload = EventXOps.pendingGetByOperationId(events = events, operationId = operationId)
+    response             <- maybePendingDownload match {
+      case Some(value) => ctx.logger.debug(s"GET_PENDING $operationId") *> Accepted()
+      case None => for{
+        _<-IO.unit
+        schema               = Events.generateDistributionSchema(events = events)
+        arMap                = EventXOps.getAllNodeXs(events = events,objectSize = objectSize).map(x=>x.nodeId->x).toMap
+        maybeLocations       = schema.get(objectId)
+        preDownloadParams = PreDownloadParams(
+          events                   = events,
+          arrivalTimeNanos         = arrivalTimeNanos,
+          arrivalTime              = arrivalTime,
+          userId                   = user.id,
+          downloadBalancerToken    = currentState.downloadBalancerToken,
+          objectId                 = objectId,
+          objectSize               = objectSize,
+          arMap                    = arMap,
+          infos                    = currentState.infos,
+        )
+        //    _____________________________________________________________________________________________________________________
+        response         <- maybeLocations match {
+          case (Some(locations)) => success(operationId,locations)(preDownloadParams)
+          case None              => notFound(operationId)(preDownloadParams)
+        }
+      } yield response
     }
     } yield response
 
@@ -220,29 +229,7 @@ object DownloadControllerV2 {
       .map(_.asInstanceOf[PutCompleted])
       .filter(_.correlationId == operationId)
       .map(x=> DumbObject(objectId = x.objectId, objectSize = x.objectSize ))
-    //    maybeLocations    = schema.get(objectId)
     req               = authReq.req
-//    maybeObjectSize        = req.headers.get(CIString("Object-Size")).map(_.map(_.value.toLongOption)).map(_.toList).getOrElse(Nil).sequence
-    //      .getOrElse(0L)
-
-//    preDownloadParams = PreDownloadParams(
-//      events                   = events,
-//      arrivalTimeNanos         = arrivalTimeNanos,
-//      arrivalTime              = arrivalTime,
-//      userId                   = user.id,
-//      downloadBalancerToken    = currentState.downloadBalancerToken,
-//      objectId                 = objectId,
-//      objectSize               = objectSize,
-//      arMap                    = arMap,
-//      infos                    = currentState.infos,
-//      //        maxAR                    = 5,
-//      //        serviceReplicationDaemon = currentState.serviceReplicationDaemon
-//    )
-    //    _____________________________________________________________________________________________________________________
-//    response         <- maybeLocations match {
-//      case (Some(locations)) => success(operationId,locations)(preDownloadParams)
-//      case None              => notFound(operationId)(preDownloadParams)
-//    }
   } yield ()
 
 
@@ -256,12 +243,9 @@ object DownloadControllerV2 {
         headers            = authReq.req.headers
         operationId        = headers.get(CIString("Operation-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
         objectSize         = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(0L)
-        //          .getOrElse(UUID.randomUUID().toString)
         //
         waitingTime        <- IO.monotonic.map(_.toNanos).map(_ - serviceTimeStart)
         //      ________________________________________________________________
-//        dumbObject         = DumbObject(objectId = objectId, objectSize = objectSize)
-//        response           <- download(operationId)(dumbObject =dumbObject ,authReq,user)
         response          <- Ok()
         //      ________________________________________________________________
         headers            = response.headers
@@ -300,28 +284,30 @@ object DownloadControllerV2 {
         val monotonic = IO.monotonic.map(_.toNanos)
         val realTime  = IO.realTime.map(_.toNanos)
         for {
-          _                <- s.acquire
-        serviceTimeStart   <- monotonic
-        now                <- realTime
-        headers            = authReq.req.headers
-        operationId        = headers.get(CIString("Operation-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
-        objectSize         = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(0L)
-          dumbObject       = DumbObject(objectId = objectId, objectSize = objectSize)
-//      _________________________________________________________________________
-        waitingTime        <- monotonic.map(_ - serviceTimeStart)
-//      ________________________________________________________________________
-        response           <- download(operationId)(dumbObject = dumbObject,authReq,user)
-//      _______________________________________________________________________
-        headers            = response.headers
-      selectedNodeId       = headers.get(CIString("Node-Id")).map(_.head.value).getOrElse("")
-//      _______________________________________________________________________
-        serviceTimeEnd     <- monotonic
-        serviceTime        = serviceTimeEnd - serviceTimeStart
-        get                = Get(
+          _                    <- s.acquire
+          serviceTimeStart     <- monotonic
+          currrentTimestamp    <- realTime
+          headers              = authReq.req.headers
+          operationId          = headers.get(CIString("Operation-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
+          objectSize           = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(0L)
+          requestStartAt       = headers.get(CIString("Request-Start-At")).map(_.head.value).flatMap(_.toLongOption).getOrElse(serviceTimeStart)
+          latency              = serviceTimeStart - requestStartAt
+          dumbObject           = DumbObject(objectId = objectId, objectSize = objectSize)
+          //      _________________________________________________________________________
+          waitingTime          <- monotonic.map(_ - serviceTimeStart)
+          //      ________________________________________________________________________
+          response             <- download(operationId)(dumbObject = dumbObject,authReq,user)
+          //      _______________________________________________________________________
+          headers              = response.headers
+          selectedNodeId       = headers.get(CIString("Node-Id")).map(_.head.value).getOrElse("")
+          //      _______________________________________________________________________
+          serviceTimeEnd       <- monotonic
+          serviceTime          = serviceTimeEnd - serviceTimeStart
+          get                  = Get(
           serialNumber     =  0,
           objectId         = objectId,
           objectSize       = objectSize,
-          timestamp        = now,
+          timestamp        = currrentTimestamp,
           nodeId           = selectedNodeId,
           serviceTimeNanos = serviceTime,
           userId           = user.id,
@@ -330,18 +316,19 @@ object DownloadControllerV2 {
           serviceTimeStart = serviceTimeStart,
 //          waitingTime      = waitingTime
         )
-        _                  <- Events.saveEvents(events = get::Nil)
-        _                  <- ctx.logger.info(s"DOWNLOAD $objectId $selectedNodeId $serviceTime $operationId")
-        newResponse        = response.putHeaders(
+          _                    <- Events.saveEvents(events = get::Nil)
+          _                    <- ctx.logger.info(s"DOWNLOAD $objectId $selectedNodeId $serviceTime $operationId")
+          newResponse          = response.putHeaders(
           Headers(
+            Header.Raw(CIString("Latency"),latency.toString),
             Header.Raw(CIString("Waiting-Time"),waitingTime.toString),
             Header.Raw(CIString("Service-Time"),serviceTime.toString),
             Header.Raw(CIString("Service-Time-Start"),serviceTimeStart.toString),
             Header.Raw(CIString("Service-Time-End"),serviceTimeEnd.toString),
           )
         )
-        _                  <- ctx.logger.debug("____________________________________________________")
-        _                  <- s.release
+          _                    <- ctx.logger.debug("____________________________________________________")
+          _                    <- s.release
       } yield newResponse
     }
 
