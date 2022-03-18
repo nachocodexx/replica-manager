@@ -213,8 +213,8 @@ object UploadControllerV2 {
         val defaultConvertion = (x:FiniteDuration) =>  x.toNanos
         val monotonic         = IO.monotonic.map(defaultConvertion)
         val program = for {
-          _                  <- s.acquire
           serviceTimeStart   <- monotonic
+          _                  <- s.acquire
           now                <- IO.realTime.map(defaultConvertion)
 //      ______________________________________________________________________________________
           currentState       <- ctx.state.get
@@ -227,7 +227,12 @@ object UploadControllerV2 {
           objectSize         = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(0L)
           fileExtension      = headers.get(CIString("File-Ext")).map(_.head.value).getOrElse("")
           filePath           = headers.get(CIString("File-Path")).map(_.head.value).getOrElse(s"$objectId.$fileExtension")
-//      ______________________________________________________________________________________________________________
+          requestStartAt     = headers.get(CIString("Request-Start-At")).map(_.head.value).flatMap(_.toLongOption).getOrElse(serviceTimeStart)
+          catalogId          = headers.get(CIString("Catalog-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
+          blockIndex         = headers.get(CIString("Block-Index")).map(_.head.value).flatMap(_.toIntOption).getOrElse(0)
+          latency            = serviceTimeStart - requestStartAt
+            //      ______________________________________________________________________________________________________________
+          _                  <- ctx.logger.debug(s"LATENCY $objectId $latency")
           _                  <- ctx.logger.debug(s"ARRIVAL_TIME $objectId $serviceTimeStart")
 //      ______________________________________________________________________________________________________________
           _                  <- ctx.logger.debug(s"SERVICE_TIME_START $objectId $serviceTimeStart")
