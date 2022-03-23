@@ -4,6 +4,7 @@ import cats.implicits._
 import cats.data.NonEmptyList
 import cats.effect.IO
 import cats.effect.std.Semaphore
+import org.http4s.Response
 //import mx.cinvestav.Declarations.BalanceResponse
 import mx.cinvestav.commons.events.{EventXOps, PutCompleted}
 import mx.cinvestav.commons.types.DumbObject
@@ -37,10 +38,11 @@ import io.circe.syntax._
 object UploadControllerV2 {
 
 
-  def alreadyUploaded(o:DumbObject,events:List[EventX])(implicit ctx:NodeContext) = {
+  def alreadyUploaded(o:DumbObject,events:List[EventX])(implicit ctx:NodeContext): IO[Response[IO]] = {
 
     for {
       _    <- ctx.logger.debug(s"PUT_PENDING ${o.objectId}")
+
       res  <- Accepted()
     } yield res
 
@@ -57,7 +59,7 @@ object UploadControllerV2 {
     for {
       _                  <- IO.unit
       nodeIds            = nodes.map(_.nodeId)
-      ufs                = nodes.map(_.ufs).toList
+//      ufs                = nodes.map(_.ufs).toList
       filteredNodes      = nodes.filter(_.availableStorageCapacity >= objectSize)
       filteredNodeIds    = filteredNodes.map(_.nodeId)
       filteredUfs        = filteredNodes.map(_.ufs)
@@ -143,7 +145,7 @@ object UploadControllerV2 {
           balances = xs.map(_._1)
           res      <- Ok(balances.asJson,headers)
         } yield res
-        case None =>ctx.logger.error("NO_SELECTED_NODE")*>Forbidden()
+        case None =>ctx.logger.error("NO_SELECTED_NODE")*>Accepted()
       }
     } yield response
   }
@@ -184,7 +186,7 @@ object UploadControllerV2 {
               _             <- IO.unit
               replicaNodes  =  Events.getReplicasByObjectId(events = events,objectId = objectId)
               filteredNodes = nodes.filterNot(x=>replicaNodes.contains(x.nodeId))
-              res           <- if(filteredNodes.isEmpty) Accepted()
+              res           <- if(filteredNodes.isEmpty) ctx.logger.debug("NO_AVAIABLE_NODES") *> Accepted()
               else commonCode(operationId)(
                   objectId   = objectId,
                   objectSize = objectSize,

@@ -846,7 +846,7 @@ object Events {
     filterEventsMonotonic(events.sortBy(_.monotonicTimestamp))
 
   def orderAndFilterEventsMonotonicV2(events:List[EventX]):List[EventX] =
-    filterEventsMonotonicV2(events.sortBy(_.monotonicTimestamp))
+    filterEventsMonotonicV2(events.sortBy(_.monotonicTimestamp)).sortBy(_.monotonicTimestamp)
 //    Events.filterEvents(EventXOps.OrderOps.byTimestamp(events=events).reverse)
 
 
@@ -868,6 +868,16 @@ object Events {
         case an: Get => an.monotonicTimestamp < rn.monotonicTimestamp && an.nodeId == rn.removedNodeId && an.nodeId == rn.removedNodeId
         case _ => false
       }
+      case put:Put =>
+        newEvents = newEvents.filterNot{
+          case p: Put => p.correlationId == put.correlationId
+          case _=> false
+        }.addOne(put.asInstanceOf[EventX])
+      case get:Get =>
+        newEvents = newEvents.filterNot{
+          case p: Get => p.correlationId == get.correlationId
+          case _=> false
+        }.addOne(get.asInstanceOf[EventX])
       case e => newEvents.append(e)
     }
     newEvents.toList
