@@ -30,7 +30,6 @@ object StatsController {
         currentState       <- ctx.state.get
         rawEvents          = currentState.events
         events             = Events.orderAndFilterEventsMonotonicV2(events = rawEvents)
-//        events             = EventXOps.(events = rawEvents)
         ars                = EventXOps.getAllNodeXs(events=events).map { node =>
               val nodeId = node.nodeId
               val publicPort = Events.getPublicPort(events= events,nodeId).map(_.publicPort).getOrElse(6666)

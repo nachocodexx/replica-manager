@@ -38,10 +38,12 @@ object UploadControllerV2 {
 
 
   def alreadyUploaded(o:DumbObject,events:List[EventX])(implicit ctx:NodeContext) = {
+
     for {
       _    <- ctx.logger.debug(s"PUT_PENDING ${o.objectId}")
       res  <- Accepted()
     } yield res
+
   }
 
   def commonCode(operationId:String)(
