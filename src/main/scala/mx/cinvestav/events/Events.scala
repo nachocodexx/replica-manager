@@ -473,7 +473,7 @@ object Events {
   }
   def getObjectByIdV3(objectId:String,operationId:String,events:List[EventX]):Option[DumbObject] ={
     val x                  = EventXOps.onlyPendingPuts(events =events)
-      .map(_.asInstanceOf[Put])
+//      .map(_.asInstanceOf[Put])
       .find(x=> x.objectId == objectId && x.correlationId == operationId )
       .map(x=>DumbObject(x.objectId,x.objectSize))
     x
@@ -510,7 +510,8 @@ object Events {
 //
 
   def getReplicasByObjectId(events:List[EventX],objectId:String) ={
-    val puts = EventXOps.onlyPuts(events = events).map(_.asInstanceOf[Put])
+//    val puts = EventXOps.onlyPuts(events = events).map(_.asInstanceOf[Put])
+    val puts = EventXOps.onlyPutCompleteds(events = events).map(_.asInstanceOf[PutCompleted])
     puts.filter(_.objectId == objectId).map(_.nodeId)
   }
   def onlyPutsAndGets(events:List[EventX])  = events.filter{
@@ -878,7 +879,7 @@ object Events {
           case p: Get => p.correlationId == get.correlationId
           case _=> false
         }.addOne(get.asInstanceOf[EventX])
-      case e => newEvents.append(e)
+      case e =>  newEvents.append(e)
     }
     newEvents.toList
   }

@@ -189,14 +189,12 @@ object DownloadControllerV2 {
     rawEvents            = currentState.events
     events               = Events.orderAndFilterEventsMonotonicV2(rawEvents)
     maybePendingDownload = EventXOps.pendingGetByOperationId(events = events, operationId = operationId)
-    response             <- maybePendingDownload match {
-      case Some(value) => ctx.logger.debug(s"GET_PENDING $operationId") *> Accepted()
-      case None => for{
-        _<-IO.unit
+    downloadProgram      = for{
+        _                    <- IO.unit
         schema               = Events.generateDistributionSchema(events = events)
         arMap                = EventXOps.getAllNodeXs(events = events,objectSize = objectSize).map(x=>x.nodeId->x).toMap
         maybeLocations       = schema.get(objectId)
-        preDownloadParams = PreDownloadParams(
+        preDownloadParams    = PreDownloadParams(
           events                   = events,
           arrivalTimeNanos         = arrivalTimeNanos,
           arrivalTime              = arrivalTime,
@@ -208,12 +206,17 @@ object DownloadControllerV2 {
           infos                    = currentState.infos,
         )
         //    _____________________________________________________________________________________________________________________
-        response         <- maybeLocations match {
+        response             <- maybeLocations match {
           case (Some(locations)) => success(operationId,locations)(preDownloadParams)
           case None              => notFound(operationId)(preDownloadParams)
         }
       } yield response
+
+    response             <- maybePendingDownload match {
+      case Some(value) => ctx.logger.debug(s"GET_PENDING $operationId") *> downloadProgram
+      case None => downloadProgram
     }
+
     } yield response
 
   def downloads(operationId:String)(authReq: AuthedRequest[IO,User],user:User)(implicit ctx:NodeContext) = for {

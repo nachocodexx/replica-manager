@@ -27,7 +27,8 @@ object CompletedUploadController {
         res          <- maybePut match {
           case Some(put) => for {
             res          <- NoContent()
-            completedPut = PutCompleted.fromPut(p = put)
+            timestamp    <- IO.realTime.map(_.toNanos)
+            completedPut = PutCompleted.fromPut(p = put,timestamp)
             _            <- Events.saveEvents(events = completedPut::Nil)
           } yield res
           //          ________________________________________________________________________
@@ -35,7 +36,7 @@ object CompletedUploadController {
         }
       } yield res
       program.handleErrorWith{ e =>
-        ctx.logger.error(e.getMessage) *> InternalServerError()
+        ctx.errorLogger.error(e.getMessage) *> InternalServerError()
       }
 
 
@@ -50,7 +51,8 @@ object CompletedUploadController {
         res          <- maybePut match {
           case Some(put) => for {
             res          <- NoContent()
-            completedPut = GetCompleted.fromPut(p = put)
+            timestamp    <- IO.realTime.map(_.toNanos)
+            completedPut = GetCompleted.fromGet(put,timestamp)
             _            <- Events.saveEvents(events = completedPut::Nil)
           } yield res
           //          ________________________________________________________________________

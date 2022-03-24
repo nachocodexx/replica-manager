@@ -42,7 +42,6 @@ object UploadControllerV2 {
 
     for {
       _    <- ctx.logger.debug(s"PUT_PENDING ${o.objectId}")
-
       res  <- Accepted()
     } yield res
 
@@ -178,24 +177,29 @@ object UploadControllerV2 {
       nN                 = arMap.size
       impactFactor       = authReq.req.headers.get(CIString("Impact-Factor")).flatMap(_.head.value.toDoubleOption).getOrElse(1/nN.toDouble)
       //   _______________________________________________________________________________
+      uploadProgram = (nodes:NonEmptyList[NodeX]) => for {
+          _             <- IO.unit
+          replicaNodes  =  Events.getReplicasByObjectId(events = events,objectId = objectId)
+          filteredNodes = nodes.filterNot(x=>replicaNodes.contains(x.nodeId))
+          res           <- if(filteredNodes.isEmpty) ctx.logger.debug("NO_AVAIABLE_NODES") *> Accepted()
+          else commonCode(operationId)(
+            objectId   = objectId,
+            objectSize = objectSize,
+            userId     = user.id,
+            events     = events,
+            nodes      = NonEmptyList.fromListUnsafe(filteredNodes),
+            rf         = math.floor(impactFactor*nN).toInt
+          )
+
+        } yield res
       response           <- maybeObject match {
-        case Some(o) => alreadyUploaded(o,events=events)
+        case Some(o) => maybeARNodeX match {
+          case Some(nodes) => alreadyUploaded(o,events = events) *> uploadProgram(nodes)
+          case None => Accepted()
+        }
         case None => maybeARNodeX match {
 //          _________________________________________________
-            case Some(nodes) => for {
-              _             <- IO.unit
-              replicaNodes  =  Events.getReplicasByObjectId(events = events,objectId = objectId)
-              filteredNodes = nodes.filterNot(x=>replicaNodes.contains(x.nodeId))
-              res           <- if(filteredNodes.isEmpty) ctx.logger.debug("NO_AVAIABLE_NODES") *> Accepted()
-              else commonCode(operationId)(
-                  objectId   = objectId,
-                  objectSize = objectSize,
-                  userId     = user.id,
-                  events     = events,
-                  nodes      = NonEmptyList.fromListUnsafe(filteredNodes),
-                  rf         = math.floor(impactFactor*nN).toInt
-                )
-            } yield res
+            case Some(nodes) => uploadProgram(nodes)
 //          ____________________________________________________
             case None => ctx.logger.debug("NO_NODES,NO_LB") *> Forbidden()
           }
@@ -249,8 +253,10 @@ object UploadControllerV2 {
           _                  <- ctx.logger.debug(s"SERVICE_TIME_END $objectId $serviceTimeEnd")
           _                  <- ctx.logger.debug(s"SERVICE_TIME $objectId $serviceTime")
 //      ______________________________________________________________________________________
-          _events            = selectedNodeIds.map{ selectedNodeId =>
+          _events            = selectedNodeIds.zipWithIndex.map{
+            case (selectedNodeId,index) =>
             Put(
+              replication          = index > 0,
               serialNumber         = 0,
               objectId             = objectId,
               objectSize           = objectSize,
