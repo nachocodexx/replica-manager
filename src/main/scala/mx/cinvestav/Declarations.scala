@@ -146,6 +146,7 @@ object Declarations {
                         uploadBalancer:Option[BalancerV3]=None,
                         downloadBalancer:Option[BalancerV3]=None,
                         downloadBalancerToken:String="ROUND_ROBIN",
+                        uploadBalancerToken:String="ROUND_ROBIN",
                         extraDownloadBalancer:Option[BalancerV3]= None,
                         events:List[EventX] = Nil,
                         monitoringEvents:List[EventX]= Nil,

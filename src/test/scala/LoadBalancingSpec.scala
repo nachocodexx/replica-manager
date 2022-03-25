@@ -4,14 +4,23 @@ import cats.implicits._
 import cats.effect._
 import mx.cinvestav.commons.types.NodeX
 import mx.cinvestav.commons.balancer.v2.{Balancer, LoadBalancer}
+import org.http4s.{Header, Headers}
+import org.typelevel.ci.CIString
+
 import scala.concurrent.duration._
 import language.postfixOps
 class LoadBalancingSpec extends munit .CatsEffectSuite {
 
   test("M"){
-    val x = Map("a"->0,"b"->0,"c"->0)
-    val y = Map("a"->1,"c"->2)
-    println(y|+|x)
+//    val x = Map("a"->0,"b"->0,"c"->0)
+//    val y = Map("a"->1,"c"->2)
+//    println(y|+|x)
+    val h1 = Headers(Header.Raw(CIString("A"),"1"))
+    val h2 = Headers(Header.Raw(CIString("A"),"2"))
+    val hs = List(h1,h2).map(_.headers).flatten
+    val hss = Headers(hs)
+//    val hss = hs.foldRight(Headers.empty)(_|+|_)
+    println(hss)
   }
   test("O"){
     for {

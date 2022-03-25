@@ -97,50 +97,53 @@ object UploadControllerV2 {
       response          <- maybeSelectedNode match {
         case Some(nodes) => for {
           _        <- IO.unit
-          xs       <- nodes.traverse{ node =>
-            for {
-              _               <- IO.unit
-              selectedNodeId  = node.nodeId
-              maybePublicPort = Events.getPublicPort(events,nodeId = selectedNodeId).map(x=>( x.publicPort,x.ipAddress))
-              res             <- maybePublicPort match {
-                case Some((publicPort,ipAddress)) => for{
-                  _              <- IO.unit
-                  apiVersionNum  = ctx.config.apiVersion
-                  apiVersion     = s"v$apiVersionNum"
-                  usePublicPort  = ctx.config.usePublicPort
-                  usedPort       = if(!usePublicPort) "6666" else publicPort.toString
-                  returnHostname = ctx.config.returnHostname
-                  //
-                  nodeUri    = if(returnHostname) s"http://${selectedNodeId}:$usedPort/api/$apiVersion/upload" else  s"http://$ipAddress:$usedPort/api/$apiVersion/upload"
-                  timestamp  <- IO.realTime.map(_.toMillis)
-                  //            _______________________________________________
-                  balanceRes = BalanceResponse(
-                    nodeId       = selectedNodeId,
-                    dockerPort  = 6666,
-                    publicPort  = publicPort,
-                    internalIp  = ipAddress,
-                    timestamp   = timestamp,
-                    apiVersion  = apiVersionNum,
-                    dockerURL   = nodeUri,
-                    operationId = operationId,
-                    objectId    = objectId,
-                    ufs         = node.ufs
-                  )
-                  //            ______________________________________
-                  resHeaders = Headers(
-                    Header.Raw(CIString("Object-Size"),objectSize.toString) ,
-                    Header.Raw(CIString("Node-Id"),selectedNodeId),
-                    Header.Raw(CIString("Public-Port"),publicPort.toString),
-                  )
-                  //              res        <- Ok(balanceRes:.asJson,resHeaders)
+          xs       <- nodes.zipWithIndex.traverse{
+            case (node,index) =>
+          for {
+            _               <- IO.unit
+            selectedNodeId  = node.nodeId
+            maybePublicPort = Events.getPublicPort(events,nodeId = selectedNodeId).map(x=>( x.publicPort,x.ipAddress))
+            res             <- maybePublicPort match {
+              case Some((publicPort,ipAddress)) => for{
+                _              <- IO.unit
+                apiVersionNum  = ctx.config.apiVersion
+                apiVersion     = s"v$apiVersionNum"
+                usePublicPort  = ctx.config.usePublicPort
+                usedPort       = if(!usePublicPort) "6666" else publicPort.toString
+                returnHostname = ctx.config.returnHostname
+                //
+                nodeUri    = if(returnHostname) s"http://${selectedNodeId}:$usedPort/api/$apiVersion/upload" else  s"http://$ipAddress:$usedPort/api/$apiVersion/upload"
+                timestamp  <- IO.realTime.map(_.toMillis)
+                //            _______________________________________________
+                balanceRes = BalanceResponse(
+                  nodeId       = selectedNodeId,
+                  dockerPort  = 6666,
+                  publicPort  = publicPort,
+                  internalIp  = ipAddress,
+                  timestamp   = timestamp,
+                  apiVersion  = apiVersionNum,
+                  dockerURL   = nodeUri,
+                  operationId = s"${operationId}_$index",
+                  objectId    = objectId,
+                  ufs         = node.ufs
+                )
+                //            ______________________________________
+                resHeaders = Headers(
+                  Header.Raw(CIString("Object-Size"),objectSize.toString) ,
+                  Header.Raw(CIString("Node-Id"),selectedNodeId),
+                  Header.Raw(CIString("Public-Port"),publicPort.toString),
+                )
+                //              res        <- Ok(balanceRes:.asJson,resHeaders)
 //                  res <- Ok()
-                } yield (balanceRes,resHeaders)
-                case None => ctx.logger.error("NO_PUBLIC_PORT|NO_IP_ADDRESS") *> (BalanceResponse.empty,Headers.empty).pure[IO]
-              }
+              } yield (balanceRes,resHeaders)
+              case None => ctx.logger.error("NO_PUBLIC_PORT|NO_IP_ADDRESS") *> (BalanceResponse.empty,Headers.empty).pure[IO]
+            }
 //            _______________________________________________________________
-            } yield res
+          } yield res
           }
-          headers  = xs.map(_._2).foldLeft(Headers.empty)(_ ++ _)
+          hs       = xs.map(_._2.headers).flatten
+          headers  = Headers(hs)
+//            .foldLeft(Headers.empty)(_ ++ _)
           balances = xs.map(_._1)
           res      <- Ok(balances.asJson,headers)
         } yield res
@@ -249,7 +252,7 @@ object UploadControllerV2 {
           serviceTime        = serviceTimeEnd - serviceTimeStart
 //       _______________________________________________________________________________
           headers            = response.headers
-          selectedNodeIds    = headers.get(CIString("Node-Id")).map(_.toList.map(_.value)).getOrElse(List.empty[String])
+          selectedNodeIds    = headers.get(CIString("Node-Id")).map(x=>x.toList.map(_.value)).getOrElse(List.empty[String])
           _                  <- ctx.logger.debug(s"SERVICE_TIME_END $objectId $serviceTimeEnd")
           _                  <- ctx.logger.debug(s"SERVICE_TIME $objectId $serviceTime")
 //      ______________________________________________________________________________________
@@ -266,7 +269,7 @@ object UploadControllerV2 {
               userId               = user.id,
               serviceTimeEnd       = serviceTimeEnd,
               serviceTimeStart     = serviceTimeStart,
-              correlationId        = operationId,
+              correlationId        = s"${operationId}_$index",
               monotonicTimestamp   = 0L,
               blockId              = blockId,
               catalogId            = catalogId,
@@ -276,6 +279,7 @@ object UploadControllerV2 {
               extension            = fileExtension
             )
           }
+          _ <- ctx.logger.debug(_events.toString)
           _                  <- Events.saveEvents(_events)
 //      ______________________________________________________________________________________
           newResponse        = response.putHeaders(

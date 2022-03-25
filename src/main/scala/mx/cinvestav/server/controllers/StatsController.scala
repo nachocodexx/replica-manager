@@ -37,7 +37,7 @@ object StatsController {
               metadata = node.metadata ++ Map("PUBLIC_PORT"->publicPort.toString)
             )
         }
-        distributionSchema = Events.generateDistributionSchema(events = events)
+        distributionSchema = Events.generateDistributionSchemaV2(events = events,ctx.config.replicationMethod)
         objectsIds         = Events.getObjectIds(events = events)
         hitCounter         = Events.getHitCounterByNode(events = events)
         hitRatioInfo       = Events.getGlobalHitRatio(events=events)
@@ -66,6 +66,7 @@ object StatsController {
           "loadBalancing" -> Json.obj(
             "download" -> currentState.downloadBalancerToken.asJson,
             "upload" -> currentState.uploadBalancer.map(_.token).getOrElse(ctx.config.uploadLoadBalancer).asJson
+//              currentState.uploadBalancer.map(_.token).getOrElse(ctx.config.uploadLoadBalancer).asJson
           ),
           "serviceTimes" -> serviceTimeByNode.asJson,
           "apiVersion" -> ctx.config.apiVersion.asJson

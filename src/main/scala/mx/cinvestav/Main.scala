@@ -45,6 +45,7 @@ object Main extends IOApp {
       status                = commons.status.Up,
       ip                    = InetAddress.getLocalHost.getHostAddress,
       downloadBalancerToken = config.downloadLoadBalancer,
+      uploadBalancerToken   = config.uploadLoadBalancer
     )
     state           <- IO.ref(_initState)
     ctx             = NodeContext(

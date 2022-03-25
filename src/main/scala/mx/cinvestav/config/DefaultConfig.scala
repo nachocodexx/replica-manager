@@ -83,6 +83,7 @@ case class DefaultConfig(
                           maxConnections:Int,
                           bufferSize:Int,
                           responseHeaderTimeoutMs:Long,
-                          nSemaphore:Int = 1
+                          nSemaphore:Int = 1,
+                          replicationMethod:String
                           //                          rabbitmq: RabbitMQClusterConfig
                         )

@@ -22,6 +22,9 @@ object CompletedUploadController {
         //      ________________________________________________________________________
         events       = Events.filterEventsMonotonicV2(events = currentState.events)
         puts         = Events.onlyPutos(events = events).map(_.asInstanceOf[Put])
+//        _            <- ctx.logger.debug(s"OPERATION_ID $operationId")
+//        _            <- ctx.logger.debug(s"OBJECT_ID $objectId")
+//        _            <- ctx.logger.debug(puts.toString)
         maybePut     = puts.find(p => p.correlationId == operationId && p.objectId == objectId)
         //      ________________________________________________________________________
         res          <- maybePut match {

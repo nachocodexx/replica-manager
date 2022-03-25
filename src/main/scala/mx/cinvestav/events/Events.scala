@@ -735,10 +735,37 @@ object Events {
 //    .map(_.objectId).distinct
 
 
-  def generateDistributionSchema(events:List[EventX]): Map[String, List[String]] =
-    EventXOps.onlyPutCompleteds(events = events).map(_.asInstanceOf[PutCompleted]).map{ up=>
-      Map(up.objectId -> List(up.nodeId))
-    }.foldLeft(Map.empty[String,List[String]])(_ |+| _)
+  def generateDistributionSchema(events:List[EventX]): Map[String, List[String]] = {
+    val completeds      = EventXOps.onlyPutCompleteds(events = events).map(_.asInstanceOf[PutCompleted])
+//    val pendings        = EventXOps.onlyPendingPuts(events = events)
+//    val pendingsGroup   = pendings.groupBy(_.objectId)
+    val completedsGroup = completeds.groupBy(_.objectId)
+    val schma  = completedsGroup.map{
+      case (str, value) => str -> value.map(_.nodeId)
+    }
+    schma
+  }
+
+  def generateDistributionSchemaV2(events:List[EventX], replicationMethod:String = "ACTIVE"): Map[String, List[String]] = {
+    val completeds      = EventXOps.onlyPutCompleteds(events = events).map(_.asInstanceOf[PutCompleted])
+    val pendings        = EventXOps.onlyPendingPuts(events = events)
+    val pendingsGroup   = pendings.groupBy(_.objectId)
+    val completedsGroup = completeds.groupBy(_.objectId)
+    val schma  = completedsGroup.map{
+      case (objectId, completedPuts) =>
+        val pendingCount = pendingsGroup.get(objectId).getOrElse(List.empty[Put]).length
+        replicationMethod match  {
+          case "ACTIVE" => if(pendingCount == 0)  objectId -> completedPuts.map(_.nodeId) else objectId -> List.empty[String]
+          case _ => objectId -> completedPuts.map(_.nodeId)
+        }
+//        else  objectId -> completedPuts.map(_.nodeId)
+
+    }
+    schma
+//          completeds.map{ up=>
+//          Map(up.objectId -> List(up.nodeId))
+//        }.foldLeft(Map.empty[String,List[String]])(_ |+| _)
+  }
 
   def getOriginalReplica(events:List[EventX]) = {
     val x = Events.onlyPutos(events = events).map(_.asInstanceOf[Put]).groupBy(_.objectId)
