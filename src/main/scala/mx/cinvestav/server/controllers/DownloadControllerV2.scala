@@ -82,7 +82,7 @@ object DownloadControllerV2 {
   }
   //  ____________________________________________________________________
   def success(operationId:String,locations:List[String])(x: PreDownloadParams)(implicit ctx:NodeContext) = {
-    for {
+    val program = for {
       _                     <- IO.unit
       //    __________________________________________________
       events                  = x.events
@@ -134,10 +134,19 @@ object DownloadControllerV2 {
           _                  <- IO.unit
           newResponse        <- processSelectedNode(operationId = operationId,objectId = objectId)(events, selectedNode)
         } yield newResponse
-        case None => Accepted()
+        case None => for {
+          currentSignalValue <- ctx.systemReplicationSignal.get
+          _                  <- ctx.logger.debug(s"DOWNLOAD_SIGNAL_VALUE $currentSignalValue")
+          _                  <- if(ctx.config.systemReplicationEnabled && !currentSignalValue) ctx.config.systemReplication.createNode().start.void else IO.unit
+          res <- Accepted()
+        } yield res
 //          ctx.logger.error("NO_SELECTED_NODE_SUCCESS") *> Forbidden()
       }
     } yield response
+
+    program.handleErrorWith{ e =>
+      ctx.logger.debug(e.getMessage) *> InternalServerError()
+    }
   }
   //  ____________________________________________________________________
   def notFound(operationId:String)(x: PreDownloadParams)(implicit ctx:NodeContext) = {
@@ -209,6 +218,7 @@ object DownloadControllerV2 {
         response             <- maybeLocations match {
           case (Some(locations)) => success(operationId,locations)(preDownloadParams)
           case None              => notFound(operationId)(preDownloadParams)
+          //            NotFound()
         }
       } yield response
 

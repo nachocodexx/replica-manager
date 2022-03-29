@@ -488,6 +488,19 @@ object Events {
     EventXOps.onlyPutCompleteds(events=events)
     .map(_.asInstanceOf[PutCompleted]).find(_.objectId == objectId)
     .map(x=>DumbObject(x.objectId,x.objectSize))
+
+  def getObjectByIdInfo(objectId:String,events:List[EventX]) = {
+    val puts = EventXOps.onlyPuts(events = events).asInstanceOf[List[Put]]
+    val xs   = EventXOps.onlyPutCompleteds(events=events)
+      .map(_.asInstanceOf[PutCompleted])
+      .filter(_.objectId == objectId)
+      .map(pc => puts.find(x=>x.objectId == objectId && x.correlationId == pc.correlationId ) )
+      .sequence
+    xs.getOrElse(List.empty[Put])
+  }
+
+  //      .getOrElse(List.empty[PutCompleted])
+//      .map(x=>DumbObject(x.objectId,x.objectSize))
   //      .distinctBy(_.objectId)
 //
   def getVolumen(events:List[EventX]) = {

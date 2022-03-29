@@ -47,16 +47,16 @@ object Main extends IOApp {
       downloadBalancerToken = config.downloadLoadBalancer,
       uploadBalancerToken   = config.uploadLoadBalancer
     )
-    state           <- IO.ref(_initState)
+    state                   <- IO.ref(_initState)
+    systemReplicationSignal <- SignallingRef[IO,Boolean](false)
     ctx             = NodeContext(
-      config=config,
-      logger=unsafeLogger,
-      state=state,
-      errorLogger = unsafeErrorLogger,
-      client=client,
-//      initTime = initTime
+      config                  = config,
+      logger                  = unsafeLogger,
+      state                   = state,
+      errorLogger             = unsafeErrorLogger,
+      client                  = client,
+      systemReplicationSignal = systemReplicationSignal
     )
-//
   } yield ctx
 
   override def run(args: List[String]): IO[ExitCode] = {

@@ -95,7 +95,8 @@ object UploadControllerV2 {
           xs
       }
       response          <- maybeSelectedNode match {
-        case Some(nodes) => for {
+        case Some(nodes)  =>
+          for {
           _        <- IO.unit
           xs       <- nodes.zipWithIndex.traverse{
             case (node,index) =>
@@ -147,7 +148,12 @@ object UploadControllerV2 {
           balances = xs.map(_._1)
           res      <- Ok(balances.asJson,headers)
         } yield res
-        case None =>ctx.logger.error("NO_SELECTED_NODE")*>Accepted()
+        case None => for {
+          currentSignalValue <- ctx.systemReplicationSignal.get
+          _                  <- ctx.logger.debug(s"UPLOAD_SIGNAL_VALUE $currentSignalValue")
+          _                  <- if(ctx.config.systemReplicationEnabled && !currentSignalValue) ctx.config.systemReplication.createNode().start.void else IO.unit
+          res <- Accepted()
+        }  yield res
       }
     } yield response
   }
