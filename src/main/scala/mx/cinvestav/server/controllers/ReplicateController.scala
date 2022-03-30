@@ -27,39 +27,38 @@ object ReplicateController {
     HttpRoutes.of[IO]{
       case req@GET -> Root / "replicate" / objectId => for {
 //
-        currentState  <- ctx.state.get
-        headers       = req.headers
-        rf            = headers.get(CIString("RF")).map(_.head.value).flatMap(_.toIntOption).getOrElse(1)
-        rawEvents     = currentState.events
-        events        = Events.orderAndFilterEventsMonotonicV2(events = rawEvents)
-        dumbObject    = Events.getObjectByIdV2(objectId = objectId,events=events)
-        replicaPuts   = Events.getObjectByIdInfo(objectId = objectId,events=events)
-        _             <- ctx.logger.debug(s"REPLICA_PUTS $replicaPuts")
-        replicaNodes  = replicaPuts.map(_.nodeId)
-        nodeXs        = Events.getAllNodeXs(events = events).map(x=>x.nodeId -> x).toMap
-
-        //        maybeNodeX   = Events.onlyPutos(events=events).map(_.asInstanceOf[Put]).filter(_.objectId == objectId).map{ x=>
-        //          val nodeId = x.nodeId
-        //          val nodeX  = nodeXs.get(nodeId)
-        //          nodeX
-        //        }.filter(_.isDefined).map(_.get)
-        //        replicaIndex = (0 until rf).toList
-        ////        _ <-
-        ////        xs = if(rf > maybeNodeX.length) replicaIndex.zipWithIndex.map( x => (x._1, maybeNodeX(x._2 % maybeNodeX.length)) )
-        ////        else maybeNodeX.zipWithIndex.map( x => (x._1, replicaIndex(x._2 % replicaIndex.length)) )
-        //        _            <- maybeObject match {
-        //          case Some(dumbObject) => for {
-        //            _           <- IO.unit
-        //            objectSize  = dumbObject.objectSize
-        //            now         <- IO.realTime.map(_.toMillis)
-        //            operationId = UUID.randomUUID().toString
-        //
-        ////
-        //          } yield ()
-        //          case None => IO.unit
-        //        }
-        //
-        response     <- Ok()
+        currentState    <- ctx.state.get
+        headers         = req.headers
+        rf              = headers.get(CIString("RF")).map(_.head.value).flatMap(_.toIntOption).getOrElse(1)
+        rawEvents       = currentState.events
+        events          = Events.orderAndFilterEventsMonotonicV2(events = rawEvents)
+        maybeDumbObject = Events.getObjectByIdV2(objectId = objectId,events=events)
+        response        <- maybeDumbObject match {
+          case Some(dumbObject) => for {
+            _               <- IO.unit
+            replicaPuts     = Events.getObjectByIdInfo(objectId = objectId,events=events)
+            _               <- ctx.logger.debug(s"REPLICA_PUTS $replicaPuts")
+            replicaNodes    = replicaPuts.map(_.nodeId)
+            nodeXs          = Events.getAllNodeXs(events = events).map(x=>x.nodeId -> x).toMap
+            availableNodes  = nodeXs.filterNot{
+              case (nodeId, _) => replicaNodes.contains(nodeId)
+            }
+            ar              = availableNodes.size
+            rfDiff          = ar - rf
+            _               <- if(rfDiff < 0) {
+              for {
+                _ <- ctx.logger.debug(s"CREATE_NODES ${rfDiff*(-1)}")
+              } yield ()
+            } else {
+              for {
+                _ <- ctx.logger.debug(s"REPLICATE $rf ${}")
+              } yield ()
+            }
+            res <- Accepted()
+          } yield res
+//        _________________________________________________________________________________________________
+          case None => Forbidden()
+        }
       } yield response
     }
 

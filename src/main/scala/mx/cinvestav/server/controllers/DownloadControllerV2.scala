@@ -137,7 +137,9 @@ object DownloadControllerV2 {
         case None => for {
           currentSignalValue <- ctx.systemReplicationSignal.get
           _                  <- ctx.logger.debug(s"DOWNLOAD_SIGNAL_VALUE $currentSignalValue")
-          _                  <- if(ctx.config.systemReplicationEnabled && !currentSignalValue) ctx.config.systemReplication.createNode().start.void else IO.unit
+          _                  <- if(ctx.config.systemReplicationEnabled && !currentSignalValue)
+            ctx.systemReplicationSignal.set(true) *> ctx.config.systemReplication.createNode().start.void  *> ctx.systemReplicationSignal.set(false)
+          else IO.unit
           res <- Accepted()
         } yield res
 //          ctx.logger.error("NO_SELECTED_NODE_SUCCESS") *> Forbidden()
