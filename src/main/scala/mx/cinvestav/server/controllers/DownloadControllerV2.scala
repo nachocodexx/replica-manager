@@ -97,35 +97,37 @@ object DownloadControllerV2 {
       infos                   = x.infos
       subsetNodes             = locations.traverse(arMap.get).get.toNel.get
       _                       <- ctx.logger.debug(s"LOCATIONS $objectId $locations")
-      locationNodeIds         = NonEmptyList.fromListUnsafe(locations)
+//      locationNodeIds         = NonEmptyList.fromListUnsafe(locations)
       locationNodes           = locations.map(arMap)
       locationUfs             = locationNodes.map(_.ufs)
       filteredNodes           = locations.map(arMap).filter(_.availableMemoryCapacity >= objectSize)
-      filteredLocationNodeIds = filteredNodes.map(_.nodeId)
-      _locationNodeIds        = NonEmptyList.fromListUnsafe(filteredLocationNodeIds)
       filteredLocationUfs     = locationNodes.map(_.ufs)
       //      _____________________________________________________________________________________________________________________________________
-      maybeSelectedNode     = if(subsetNodes.length ==1) subsetNodes.head.some
-      else if(filteredNodes.isEmpty) None
-      else ctx.config.downloadLoadBalancer match {
-        case "ROUND_ROBIN"   =>
+      maybeSelectedNode     = if(filteredNodes.isEmpty) None
+      else if(filteredNodes.length == 1) subsetNodes.head.some
+      else {
+        val filteredLocationNodeIds = filteredNodes.map(_.nodeId)
+        val _locationNodeIds        = NonEmptyList.fromListUnsafe(filteredLocationNodeIds)
+        ctx.config.downloadLoadBalancer match {
+          case "ROUND_ROBIN"   =>
             val counter          = gets.groupBy(_.nodeId).map(x=> x._1-> x._2.length).filter(x=> _locationNodeIds.contains_(x._1))
             val selectedNodeId   = deterministic.RoundRobin(nodeIds = _locationNodeIds).balanceWith(nodeIds = _locationNodeIds,counter = counter)
             arMap.get(selectedNodeId)
-        case "PSEUDO_RANDOM" =>
-          val selectedNodeId = deterministic.PseudoRandom(nodeIds = _locationNodeIds).balance
-          arMap.get(selectedNodeId)
-        case "TWO_CHOICES"   =>
-          val psrnd               = deterministic.PseudoRandom(nodeIds = _locationNodeIds)
-          val maybeSelectedNodeId = nondeterministic.TwoChoices(psrnd = psrnd)
-            .balances(ufs =  filteredLocationUfs,mapUf = _.memoryUF)
-            .headOption
-          maybeSelectedNodeId.flatMap(arMap.get)
-        case "SORTING_UF" =>
-          val maybeSelectedNodeId = nondeterministic.SortingUF()
-            .balance(ufs = filteredLocationUfs,mapUf = _.memoryUF)
-            .headOption
-          maybeSelectedNodeId.flatMap(arMap.get)
+          case "PSEUDO_RANDOM" =>
+            val selectedNodeId = deterministic.PseudoRandom(nodeIds = _locationNodeIds).balance
+            arMap.get(selectedNodeId)
+          case "TWO_CHOICES"   =>
+            val psrnd               = deterministic.PseudoRandom(nodeIds = _locationNodeIds)
+            val maybeSelectedNodeId = nondeterministic.TwoChoices(psrnd = psrnd)
+              .balances(ufs =  filteredLocationUfs,mapUf = _.memoryUF)
+              .headOption
+            maybeSelectedNodeId.flatMap(arMap.get)
+          case "SORTING_UF" =>
+            val maybeSelectedNodeId = nondeterministic.SortingUF()
+              .balance(ufs = filteredLocationUfs,mapUf = _.memoryUF)
+              .headOption
+            maybeSelectedNodeId.flatMap(arMap.get)
+        }
       }
       //      _____________________________________________________________________________________________________________________________________
       _                     <- ctx.logger.debug(s"SELECTED_NODE $maybeSelectedNode")
@@ -268,20 +270,20 @@ object DownloadControllerV2 {
         //      ________________________________________________________________
         serviceTimeEnd     <- IO.monotonic.map(_.toNanos)
         serviceTime        = serviceTimeEnd - serviceTimeStart
-        get                = Get(
-          serialNumber     =  0,
-          objectId         = operationId,
-          objectSize       = objectSize,
-          timestamp        = now,
-          nodeId           = selectedNodeId,
-          serviceTimeNanos = serviceTime,
-          userId           = user.id,
-          correlationId    = operationId,
-          serviceTimeEnd   = serviceTimeEnd,
-          serviceTimeStart = serviceTimeStart,
-//          waitingTime      = waitingTime
-        )
-        _                  <- Events.saveEvents(events = get::Nil)
+//        get                = Get(
+//          serialNumber     =  0,
+//          objectId         = operationId,
+//          objectSize       = objectSize,
+//          timestamp        = now,
+//          nodeId           = selectedNodeId,
+//          serviceTimeNanos = serviceTime,
+//          userId           = user.id,
+//          correlationId    = operationId,
+//          serviceTimeEnd   = serviceTimeEnd,
+//          serviceTimeStart = serviceTimeStart,
+////          waitingTime      = waitingTime
+//        )
+//        _                  <- Events.saveEvents(events = get::Nil)
         _                  <- ctx.logger.info(s"DOWNLOAD $operationId $selectedNodeId $serviceTime $operationId")
         newResponse        = response.putHeaders(
           Headers(
@@ -318,21 +320,22 @@ object DownloadControllerV2 {
           //      _______________________________________________________________________
           serviceTimeEnd       <- monotonic
           serviceTime          = serviceTimeEnd - serviceTimeStart
-          get                  = Get(
-          serialNumber     =  0,
-          objectId         = objectId,
-          objectSize       = objectSize,
-          timestamp        = currrentTimestamp,
-          nodeId           = selectedNodeId,
-          serviceTimeNanos = serviceTime,
-          userId           = user.id,
-          correlationId    = operationId,
-          serviceTimeEnd   = serviceTimeEnd,
-          serviceTimeStart = serviceTimeStart,
-//          waitingTime      = waitingTime
-        )
-          _                    <- Events.saveEvents(events = get::Nil)
-          _                    <- ctx.logger.info(s"DOWNLOAD $objectId $selectedNodeId $serviceTime $operationId")
+          _                    <- if(selectedNodeId.nonEmpty) {
+            val get                  = Get(
+              serialNumber     =  0,
+              objectId         = objectId,
+              objectSize       = objectSize,
+              timestamp        = currrentTimestamp,
+              nodeId           = selectedNodeId,
+              serviceTimeNanos = serviceTime,
+              userId           = user.id,
+              correlationId    = operationId,
+              serviceTimeEnd   = serviceTimeEnd,
+              serviceTimeStart = serviceTimeStart,
+              //          waitingTime      = waitingTime
+            )
+             Events.saveEvents(events = get::Nil) *> ctx.logger.info(s"DOWNLOAD $objectId $selectedNodeId $serviceTime $operationId")
+          } else ctx.logger.debug(s"NO_AVAILABLE_NODE $operationId $objectId")
           newResponse          = response.putHeaders(
           Headers(
             Header.Raw(CIString("Latency"),latency.toString),
