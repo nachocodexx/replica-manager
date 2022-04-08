@@ -65,8 +65,7 @@ object StatsController {
           "hitInfo" -> hitRatioInfo.asJson,
           "loadBalancing" -> Json.obj(
             "download" -> currentState.downloadBalancerToken.asJson,
-            "upload" -> currentState.uploadBalancer.map(_.token).getOrElse(ctx.config.uploadLoadBalancer).asJson
-//              currentState.uploadBalancer.map(_.token).getOrElse(ctx.config.uploadLoadBalancer).asJson
+            "upload" -> currentState.uploadBalancerToken.asJson
           ),
           "serviceTimes" -> serviceTimeByNode.asJson,
           "apiVersion" -> ctx.config.apiVersion.asJson

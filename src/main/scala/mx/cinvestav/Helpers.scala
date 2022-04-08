@@ -345,33 +345,9 @@ object Helpers {
 //
 //  }
 
-  def initLoadBalancerV3(balancerToken:String="UF")(implicit ctx:NodeContext): IO[BalancerV3] = for {
-    _       <- IO.unit
-    newLbV3 = balancerToken match {
-      case  "SORTING_UF"=> UF()(nodeXOrder)
-      case  "TWO_CHOICES"=> TwoChoices()(nodeXOrder)
-      case "ROUND_ROBIN" => RoundRobin(forOperation = "UPLOAD_REQUESTS")(nodeXOrder)
-      case "PSEUDO_RANDOM" => PseudoRandom()(nodeXOrder)
-      case _ => UF()
-    }
-    _      <- ctx.state.update(s=>
-      s.copy(
-        uploadBalancer = newLbV3.some
-      )
-    )
-  } yield newLbV3
-//  def initLoadBalancer(loadBalancerType:String="LC",
+
 //                       nodes:NonEmptyList[NodeX])(implicit ctx:NodeContext): IO[Balancer[NodeX]] = for {
 //    _       <- IO.unit
-//    newLb   = LoadBalancer[NodeX](loadBalancerType,xs= nodes)
-////    newLbV3 = PseudoRandom()
-//    _      <- ctx.state.update(s=>
-//      s.copy(
-//        lb =  newLb.some,
-////        uploadBalancer = newLbV3.some
-//      )
-//    )
-//  } yield newLb
 
 //  Update node metadata -> update schema
   def commonLogic(arrivalTime:Long,req:Request[IO])(selectedNode:NodeX)(implicit ctx:NodeContext): IO[Response[IO]] ={
@@ -415,35 +391,6 @@ object Helpers {
         _             <- ctx.logger.info(s"UPLOAD ${payload.guid} ${payload.objectSize} ${selectedNode.nodeId} $time")
       } yield response
     }
-
-  def placeReplicaInAR(arrivalTime:Long,
-                       arMap:Map[String,NodeX],
-                       lb:Balancer[NodeX],
-                       req:Request[IO]
-                      )
-                      (objectId: ObjectId,
-                       availableResources:List[String])
-                      (implicit ctx:NodeContext): IO[Response[IO]] =
-    for {
-      _                           <- ctx.logger.debug(s"THERE ARE FREE SPACES $availableResources")
-      headers                     = req.headers
-      maybeGuid                   = headers.get(CIString("guid")).map(_.head.value)
-      subsetNodes                 = NonEmptyList.fromListUnsafe(availableResources.map(x=>arMap(x)))
-      rf                          = 1
-      (newBalancer,selectedNodes) = Balancer.balanceOverSubset(balancer = lb, rounds= rf ,subsetNodes =subsetNodes)
-      _                           <- ctx.logger.debug(s"SELECTED_NODES $selectedNodes")
-      _                           <- ctx.state.update(s=>s.copy(lb = newBalancer.some))
-      fiber                       <- selectedNodes.traverse(Helpers.commonLogic(arrivalTime=arrivalTime,req=req)(_))
-      endAt                       <- IO.realTime.map(_.toMillis)
-      milliSeconds                = endAt - arrivalTime
-      payloadRss = ReplicationResponse(
-        guid = objectId.value,
-        replicas= selectedNodes.toList.map(_.nodeId),
-        milliSeconds =  milliSeconds ,
-        timestamp = arrivalTime
-      )
-      _res  <- Ok(payloadRss.asJson)
-    } yield _res
 
   //  Create a SN and update the schema
 

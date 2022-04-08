@@ -2,7 +2,7 @@ import cats.Order
 import cats.data.NonEmptyList
 import cats.implicits._
 import cats.effect._
-import mx.cinvestav.commons.types.NodeX
+import mx.cinvestav.commons.types.{NodeX, PendingReplication}
 import mx.cinvestav.commons.balancer.v2.{Balancer, LoadBalancer}
 import org.http4s.{Header, Headers}
 import org.typelevel.ci.CIString
@@ -11,6 +11,17 @@ import scala.concurrent.duration._
 import language.postfixOps
 class LoadBalancingSpec extends munit .CatsEffectSuite {
 
+  test("K"){
+    val ps = List(
+      PendingReplication(rf = 0,objectId = "o0",objectSize = 0L),
+      PendingReplication(rf = 1,objectId = "o0",objectSize = 0L),
+      PendingReplication(rf = 2,objectId = "o0",objectSize = 0L),
+    )
+    val ps0 = ps.filter(_.rf>0)
+    println(ps0)
+//    val program = IO.println("PUTOS TODOS") *> IO.println("AAAAAA") *> IO.pure(scala.math.random())
+//    program.replicateA(10).flatTap(xs=>IO.println(xs.toString))
+  }
   test("M"){
 //    val x = Map("a"->0,"b"->0,"c"->0)
 //    val y = Map("a"->1,"c"->2)

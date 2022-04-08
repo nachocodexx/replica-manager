@@ -60,7 +60,7 @@ object UpdateConfig {
 //        _ <- currentState.replicationDaemonSingal.set(false)
 //        _ <- Helpers.replicationDaemon(s,period = repDaemonMillis.milliseconds,signal = currentState.replicationDaemonSingal).start.void
 //      } yield ()
-      _                <- Helpers.initLoadBalancerV3(uploadBalancer)
+//      _                <- Helpers.initLoadBalancerV3(uploadBalancer)
       //      UPDATE DOWNLOAD LB
       response    <- NoContent()
     } yield  response

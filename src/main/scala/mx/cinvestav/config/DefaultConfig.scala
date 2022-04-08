@@ -1,18 +1,21 @@
 package mx.cinvestav.config
 
 import cats.implicits._
-import io.circe._
-import io.circe.syntax._
-import io.circe.generic.auto._
 import cats.effect._
 import io.circe.Json
 import mx.cinvestav.Declarations.NodeContext
 import mx.cinvestav.commons.docker.Image
+import mx.cinvestav.commons.types.SystemReplicationResponse
 import org.http4s._
 //import org.http4s.Me
 //import org.http4s.blaze.http.http2.PseudoHeaders.Method
 import org.http4s.{Request, Uri}
+//
+import io.circe._
+import io.circe.syntax._
+import io.circe.generic.auto._
 import org.http4s.circe.CirceEntityEncoder._
+import org.http4s.circe.CirceEntityDecoder._
 
 trait NodeInfo {
     def protocol: String
@@ -71,11 +74,21 @@ case class SystemReplication(protocol:String="http", ip:String="127.0.0.1", host
     //      .withEntity(json)
     for {
       _      <- ctx.logger.debug(s"CREATE_NODE_URI ${this.createNodeUri}")
-      status <- ctx.client.status(req)
+      status <- ctx.client.expect[SystemReplicationResponse](req)
       _      <- ctx.logger.debug(s"CREATE_NODE_STATUS $status")
     } yield status
 
   }
+  def launchNode()(implicit ctx:NodeContext) = for {
+    _                       <- IO.unit
+    systemReplicationSignal = ctx.systemReplicationSignal
+    currentSignalValue      <- systemReplicationSignal.get
+    _                       <- ctx.logger.debug(s"UPLOAD_SIGNAL_VALUE $currentSignalValue")
+    res                       <- if(ctx.config.systemReplicationEnabled && !currentSignalValue)
+    ctx.systemReplicationSignal.set(true) *> createNode().map(_.some)  <* systemReplicationSignal.set(false)
+    else IO.pure(None)
+  }  yield res
+
   def reset()(implicit ctx:NodeContext) = for {
     _   <- IO.unit
     req =  Request[IO](
@@ -115,13 +128,14 @@ case class DefaultConfig(
                           hasNextPool:Boolean,
                           apiVersion:Int,
                           dataReplication:DataReplicationSystem,
-                          monitoringDelayMs:Int,
+                          daemonDelayMs:Int,
                           usePublicPort:Boolean,
                           maxConnections:Int,
                           bufferSize:Int,
                           responseHeaderTimeoutMs:Long,
                           nSemaphore:Int = 1,
                           replicationMethod:String,
-                          systemReplicationEnabled:Boolean
+                          systemReplicationEnabled:Boolean,
+                          defaultImpactFactor:Double = 0.0
                           //                          rabbitmq: RabbitMQClusterConfig
                         )

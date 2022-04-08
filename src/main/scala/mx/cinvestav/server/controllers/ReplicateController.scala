@@ -48,6 +48,9 @@ object ReplicateController {
             _               <- if(rfDiff < 0) {
               for {
                 _ <- ctx.logger.debug(s"CREATE_NODES ${rfDiff*(-1)}")
+                createNodeAndReplicate = for {
+                  _ <- ctx.systemReplicationSignal
+                } yield ()
               } yield ()
             } else {
               for {

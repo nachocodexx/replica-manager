@@ -64,9 +64,9 @@ object Main extends IOApp {
       (client,finalizer)         <- BlazeClientBuilder[IO](global).withDefaultSocketReuseAddress.resource.allocated
       sDownload                  <- Semaphore[IO](config.nSemaphore)
       implicit0(ctx:NodeContext) <- initContext(client)
-//      _                  <- Daemon(period = ctx.config.monitoringDelayMs milliseconds).compile.drain.start
-      _                  <- HttpServer(sDownload).run()
-      _                  <- finalizer
+      _                          <- Daemon(period = ctx.config.daemonDelayMs milliseconds).compile.drain.start
+      _                          <- HttpServer(sDownload).run()
+      _                          <- finalizer
     } yield (ExitCode.Success)
   }
 }

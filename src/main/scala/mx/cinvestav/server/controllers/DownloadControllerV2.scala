@@ -32,7 +32,7 @@ object DownloadControllerV2 {
                                 objectId:String,
                                 objectSize:Long,
                                 arMap:Map[String,NodeX],
-                                infos:List[Monitoring.NodeInfo],
+//                                infos:List[Monitoring.NodeInfo],
                                 waitingTime:Long =0L,
                               )
 
@@ -81,54 +81,87 @@ object DownloadControllerV2 {
       } yield newResponse
   }
   //  ____________________________________________________________________
+
+  def balance(locations:List[String],arMap:Map[String,NodeX],objectSize:Long,gets:List[EventX])(implicit ctx:NodeContext) = {
+    val locationNodes           = locations.map(arMap)
+    val filteredNodes           = locationNodes.filter(_.availableMemoryCapacity >= objectSize)
+    val filteredLocationUfs     = filteredNodes.map(_.ufs)
+    //      _____________________________________________________________________________________________________________________________________
+     if(filteredNodes.isEmpty) None
+    else if(filteredNodes.length == 1) filteredNodes.head.some
+    else {
+      val filteredLocationNodeIds = filteredNodes.map(_.nodeId)
+      val _locationNodeIds        = NonEmptyList.fromListUnsafe(filteredLocationNodeIds)
+      ctx.config.downloadLoadBalancer match {
+        case "ROUND_ROBIN"   =>
+          val counter          = gets.groupBy(_.nodeId).map(x=> x._1-> x._2.length).filter(x=> _locationNodeIds.contains_(x._1))
+          val selectedNodeId   = deterministic.RoundRobin(nodeIds = _locationNodeIds).balanceWith(nodeIds = _locationNodeIds,counter = counter)
+          arMap.get(selectedNodeId)
+        case "PSEUDO_RANDOM" =>
+          val selectedNodeId = deterministic.PseudoRandom(nodeIds = _locationNodeIds).balance
+          arMap.get(selectedNodeId)
+        case "TWO_CHOICES"   =>
+          val psrnd               = deterministic.PseudoRandom(nodeIds = _locationNodeIds)
+          val maybeSelectedNodeId = nondeterministic.TwoChoices(psrnd = psrnd)
+            .balances(ufs =  filteredLocationUfs,mapUf = _.memoryUF)
+            .headOption
+          maybeSelectedNodeId.flatMap(arMap.get)
+        case "SORTING_UF" =>
+          val maybeSelectedNodeId = nondeterministic.SortingUF()
+            .balance(ufs = filteredLocationUfs,mapUf = _.memoryUF)
+            .headOption
+          maybeSelectedNodeId.flatMap(arMap.get)
+      }
+    }
+  }
   def success(operationId:String,locations:List[String])(x: PreDownloadParams)(implicit ctx:NodeContext) = {
     val program = for {
       _                     <- IO.unit
       //    __________________________________________________
       events                  = x.events
       gets                    = EventXOps.onlyGetCompleteds(events = events)
-      arrivalTimeNanos        = x.arrivalTimeNanos
-      arrivalTime             = x.arrivalTime
       userId                  = x.userId
-      downloadBalancerToken   = x.downloadBalancerToken
       objectId                = x.objectId
       objectSize              = x.objectSize
       arMap                   = x.arMap
-      infos                   = x.infos
-      subsetNodes             = locations.traverse(arMap.get).get.toNel.get
+//      subsetNodes             = locations.traverse(arMap.get).get.toNel.get
       _                       <- ctx.logger.debug(s"LOCATIONS $objectId $locations")
-//      locationNodeIds         = NonEmptyList.fromListUnsafe(locations)
-      locationNodes           = locations.map(arMap)
-      locationUfs             = locationNodes.map(_.ufs)
-      filteredNodes           = locations.map(arMap).filter(_.availableMemoryCapacity >= objectSize)
-      filteredLocationUfs     = locationNodes.map(_.ufs)
-      //      _____________________________________________________________________________________________________________________________________
-      maybeSelectedNode     = if(filteredNodes.isEmpty) None
-      else if(filteredNodes.length == 1) subsetNodes.head.some
-      else {
-        val filteredLocationNodeIds = filteredNodes.map(_.nodeId)
-        val _locationNodeIds        = NonEmptyList.fromListUnsafe(filteredLocationNodeIds)
-        ctx.config.downloadLoadBalancer match {
-          case "ROUND_ROBIN"   =>
-            val counter          = gets.groupBy(_.nodeId).map(x=> x._1-> x._2.length).filter(x=> _locationNodeIds.contains_(x._1))
-            val selectedNodeId   = deterministic.RoundRobin(nodeIds = _locationNodeIds).balanceWith(nodeIds = _locationNodeIds,counter = counter)
-            arMap.get(selectedNodeId)
-          case "PSEUDO_RANDOM" =>
-            val selectedNodeId = deterministic.PseudoRandom(nodeIds = _locationNodeIds).balance
-            arMap.get(selectedNodeId)
-          case "TWO_CHOICES"   =>
-            val psrnd               = deterministic.PseudoRandom(nodeIds = _locationNodeIds)
-            val maybeSelectedNodeId = nondeterministic.TwoChoices(psrnd = psrnd)
-              .balances(ufs =  filteredLocationUfs,mapUf = _.memoryUF)
-              .headOption
-            maybeSelectedNodeId.flatMap(arMap.get)
-          case "SORTING_UF" =>
-            val maybeSelectedNodeId = nondeterministic.SortingUF()
-              .balance(ufs = filteredLocationUfs,mapUf = _.memoryUF)
-              .headOption
-            maybeSelectedNodeId.flatMap(arMap.get)
-        }
-      }
+      maybeSelectedNode       = balance(
+        locations  = locations,
+        arMap      = arMap,
+        objectSize = objectSize,
+        gets       = gets
+      )
+//      filteredNodes           = locationNodes.filter(_.availableMemoryCapacity >= objectSize)
+//      filteredLocationUfs     = filteredNodes.map(_.ufs)
+//      //      _____________________________________________________________________________________________________________________________________
+//      maybeSelectedNode     = if(filteredNodes.isEmpty) None
+//      else if(filteredNodes.length == 1) subsetNodes.head.some
+//      else {
+//        val filteredLocationNodeIds = filteredNodes.map(_.nodeId)
+//        val _locationNodeIds        = NonEmptyList.fromListUnsafe(filteredLocationNodeIds)
+//        ctx.config.downloadLoadBalancer match {
+//          case "ROUND_ROBIN"   =>
+////            val counter          = gets.groupBy(_.nodeId).map(x=> x._1-> x._2.length).filter(x=> _locationNodeIds.contains_(x._1))
+//            val counter                 = gets.groupBy(_.nodeId).map(x=> x._1-> x._2.length).filter(x=> _locationNodeIds.contains_(x._1))
+//            val selectedNodeId   = deterministic.RoundRobin(nodeIds = _locationNodeIds).balanceWith(nodeIds = _locationNodeIds,counter = counter)
+//            arMap.get(selectedNodeId)
+//          case "PSEUDO_RANDOM" =>
+//            val selectedNodeId = deterministic.PseudoRandom(nodeIds = _locationNodeIds).balance
+//            arMap.get(selectedNodeId)
+//          case "TWO_CHOICES"   =>
+//            val psrnd               = deterministic.PseudoRandom(nodeIds = _locationNodeIds)
+//            val maybeSelectedNodeId = nondeterministic.TwoChoices(psrnd = psrnd)
+//              .balances(ufs =  filteredLocationUfs,mapUf = _.memoryUF)
+//              .headOption
+//            maybeSelectedNodeId.flatMap(arMap.get)
+//          case "SORTING_UF" =>
+//            val maybeSelectedNodeId = nondeterministic.SortingUF()
+//              .balance(ufs = filteredLocationUfs,mapUf = _.memoryUF)
+//              .headOption
+//            maybeSelectedNodeId.flatMap(arMap.get)
+//        }
+//      }
       //      _____________________________________________________________________________________________________________________________________
       _                     <- ctx.logger.debug(s"SELECTED_NODE $maybeSelectedNode")
       response              <- maybeSelectedNode match {
@@ -137,12 +170,19 @@ object DownloadControllerV2 {
           newResponse        <- processSelectedNode(operationId = operationId,objectId = objectId)(events, selectedNode)
         } yield newResponse
         case None => for {
-          currentSignalValue <- ctx.systemReplicationSignal.get
-          _                  <- ctx.logger.debug(s"DOWNLOAD_SIGNAL_VALUE $currentSignalValue")
-          _                  <- if(ctx.config.systemReplicationEnabled && !currentSignalValue)
-            ctx.systemReplicationSignal.set(true) *> ctx.config.systemReplication.createNode().start.void  *> ctx.systemReplicationSignal.set(false)
-          else IO.unit
-          res <- Accepted()
+          currentState  <- ctx.state.get
+          misses        = currentState.misses
+          missesCounter = misses.getOrElse(objectId,1)
+          _             <- ctx.logger.debug(s"MISS $objectId $missesCounter")
+          _             <- ctx.state.update(s=> s.copy(misses = s.misses.updatedWith(objectId){ op =>
+              op match {
+                case Some(value) => (value+1).some
+                case None => 1.some
+              }
+            }
+
+          ))
+          res          <- Accepted()
         } yield res
 //          ctx.logger.error("NO_SELECTED_NODE_SUCCESS") *> Forbidden()
       }
@@ -164,24 +204,24 @@ object DownloadControllerV2 {
       objectId                 = x.objectId
       objectSize               = x.objectSize
       arMap                    = x.arMap
-      infos                    = x.infos
 //      maxAR                    = x.maxAR
 //      serviceReplicationDaemon = x.serviceReplicationDaemon
 //    ___________________________________________________________
       predicate             = ctx.config.cloudEnabled  || ctx.config.hasNextPool
       response              <- if(predicate){
         for {
-          _                       <- ctx.logger.debug(s"MISS $objectId")
-          nodes                   = EventXOps.getAllNodeXs(events = events)
-          nodesWithAvailablePages = nodes.filter(_.availableCacheSize>0)
-          arMap                   = nodes.map(x=>x.nodeId->x).toMap
-          maybeSelectedNode       <- if(nodes.length==1) nodes.headOption.pure[IO]
-          else if(nodesWithAvailablePages.isEmpty)  for{
-            _                  <- ctx.logger.debug("ALL NODES ARE FULL - SELECT A NODE RANDOMLY")
-            maybeSelectedNode  = Events.balanceByReplica(downloadBalancer = "PSEUDO_RANDOM")(objectId= objectId,arMap = arMap,events=events, infos = infos)
-          } yield maybeSelectedNode
-          else nodesWithAvailablePages.maxByOption(_.availableCacheSize).pure[IO]
-//        _________________________________________________________________________
+          _                 <- ctx.logger.debug(s"MISS $objectId")
+          nodes             = EventXOps.getAllNodeXs(events = events)
+          availableNodes    = nodes.filter(_.availableMemoryCapacity>= objectSize)
+          arMap             = nodes.map(x=>x.nodeId->x).toMap
+          maybeSelectedNode = Option.empty[NodeX]
+//          maybeSelectedNode <- if(nodes.length==1) nodes.headOption.pure[IO]
+//          else if(availableNodes.isEmpty)  for{
+//            _   <- ctx.logger.debug("ALL NODES ARE FULL - SELECT A NODE RANDOMLY")
+//            res = None
+//          } yield res
+//          else availableNodes.maxByOption(_.availableCacheSize).pure[IO]
+          //        _________________________________________________________________________
           response <- maybeSelectedNode match {
             case Some(selectedNode) => processSelectedNode(operationId = operationId,objectId = objectId)(events, selectedNode)
             case None => Accepted()
@@ -216,7 +256,7 @@ object DownloadControllerV2 {
           objectId                 = objectId,
           objectSize               = objectSize,
           arMap                    = arMap,
-          infos                    = currentState.infos,
+//          infos                    = currentState.infos,
         )
         //    _____________________________________________________________________________________________________________________
         response             <- maybeLocations match {

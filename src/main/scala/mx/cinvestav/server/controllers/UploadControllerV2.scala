@@ -4,6 +4,7 @@ import cats.implicits._
 import cats.data.NonEmptyList
 import cats.effect.IO
 import cats.effect.std.Semaphore
+import mx.cinvestav.commons.types.PendingReplication
 import org.http4s.Response
 //import mx.cinvestav.Declarations.BalanceResponse
 import mx.cinvestav.commons.events.{EventXOps, PutCompleted}
@@ -47,6 +48,46 @@ object UploadControllerV2 {
 
   }
 
+  def balance(events: List[EventX])(objectSize:Long,nodes:NonEmptyList[NodeX],rf:Int)(implicit ctx:NodeContext) = {
+    val nodeIds            = nodes.map(_.nodeId)
+    val filteredNodes      = nodes.filter(_.availableStorageCapacity >= objectSize)
+    val filteredNodeIds    = filteredNodes.map(_.nodeId)
+    val filteredUfs        = filteredNodes.map(_.ufs)
+
+    if(filteredNodes.isEmpty) Option.empty[List[NodeX]]  else ctx.config.uploadLoadBalancer match {
+      case "SORTING_UF" =>
+        val selectedNodeIds = nondeterministic.SortingUF()
+          .balance(ufs = filteredUfs,takeN = rf)
+        val xs = selectedNodeIds.map(nodeId => nodes.find(_.nodeId == nodeId) ).sequence
+        xs
+      case "TWO_CHOICES" =>
+        val selectedNodeIds = nondeterministic.TwoChoices(
+          psrnd = deterministic.PseudoRandom(nodeIds = NonEmptyList.fromListUnsafe(filteredNodeIds))
+        ).balances(ufs =filteredUfs,takeN = rf)
+        val xs = selectedNodeIds.map(nodeId => nodes.find(_.nodeId == nodeId)).sequence
+        xs
+      case "PSEUDO_RANDOM" =>
+        val selectedNodeIds = deterministic.PseudoRandom(nodeIds = NonEmptyList.fromListUnsafe(filteredNodeIds)).balanceReplicas(replicaNodes = Nil,takeN=rf)
+        val xs = selectedNodeIds.map(nodeId => nodes.find(_.nodeId == nodeId)).sequence
+        xs
+      case "ROUND_ROBIN" =>
+        val defaultCounter = nodeIds.map(x=>x->0).toList.toMap
+        val lb      = deterministic.RoundRobin(nodeIds = nodeIds)
+        val counter = Events.onlyPutos(events=events).map(_.asInstanceOf[Put]).filterNot(_.replication).groupBy(_.nodeId).map{
+          case (nodeId,xs)=>nodeId -> xs.length
+        }
+        val pivotNode     = lb.balanceWith(nodeIds =nodeIds,counter = counter |+| defaultCounter)
+        val selectedNodes = lb.balanceReplicas(
+          replicaNodes = pivotNode::Nil,
+          takeN =  rf-1
+        )
+        val selectedNodes0 = (List(pivotNode) ++ selectedNodes)
+        val xs = selectedNodes0.map(nodeId => nodes.find(_.nodeId == nodeId)).sequence
+        xs
+    }
+  }
+
+
   def commonCode(operationId:String)(
     objectId:String,
     objectSize:Long,
@@ -57,104 +98,88 @@ object UploadControllerV2 {
   )(implicit ctx:NodeContext) = {
     for {
       _                  <- IO.unit
-      nodeIds            = nodes.map(_.nodeId)
-//      ufs                = nodes.map(_.ufs).toList
-      filteredNodes      = nodes.filter(_.availableStorageCapacity >= objectSize)
-      filteredNodeIds    = filteredNodes.map(_.nodeId)
-      filteredUfs        = filteredNodes.map(_.ufs)
-
-      maybeSelectedNode =if(filteredNodes.isEmpty) Option.empty[List[NodeX]]  else ctx.config.uploadLoadBalancer match {
-        case "SORTING_UF" =>
-          val selectedNodeIds = nondeterministic.SortingUF()
-          .balance(ufs = filteredUfs,takeN = rf)
-          val xs = selectedNodeIds.map(nodeId => nodes.find(_.nodeId == nodeId) ).sequence
-          xs
-        case "TWO_CHOICES" =>
-          val selectedNodeIds = nondeterministic.TwoChoices(
-            psrnd = deterministic.PseudoRandom(nodeIds = NonEmptyList.fromListUnsafe(filteredNodeIds))
-          ).balances(ufs =filteredUfs,takeN = rf)
-          val xs = selectedNodeIds.map(nodeId => nodes.find(_.nodeId == nodeId)).sequence
-          xs
-        case "PSEUDO_RANDOM" =>
-          val selectedNodeIds = deterministic.PseudoRandom(nodeIds = NonEmptyList.fromListUnsafe(filteredNodeIds)).balanceReplicas(replicaNodes = Nil,takeN=rf)
-          val xs = selectedNodeIds.map(nodeId => nodes.find(_.nodeId == nodeId)).sequence
-          xs
-        case "ROUND_ROBIN" =>
-          val defaultCounter = nodeIds.map(x=>x->0).toList.toMap
-          val lb      = deterministic.RoundRobin(nodeIds = nodeIds)
-          val counter = Events.onlyPutos(events=events).map(_.asInstanceOf[Put]).filterNot(_.replication).groupBy(_.nodeId).map{
-              case (nodeId,xs)=>nodeId -> xs.length
-            }
-          val pivotNode     = lb.balanceWith(nodeIds =nodeIds,counter = counter |+| defaultCounter)
-          val selectedNodes = lb.balanceReplicas(
-            replicaNodes = pivotNode::Nil,
-            takeN =  rf-1
-          )
-          val selectedNodes0 = (List(pivotNode) ++ selectedNodes)
-          val xs = selectedNodes0.map(nodeId => nodes.find(_.nodeId == nodeId)).sequence
-          xs
-      }
+      maybeSelectedNode  = balance(events= events)(objectSize = objectSize,nodes = nodes,rf = rf)
       response          <- maybeSelectedNode match {
         case Some(nodes)  =>
+          val nNodes  = nodes.length
+          val diffRF  = rf - nNodes
+
+          val program = for {
+              _        <- ctx.logger.debug(s"SELECTED_NODES $nodes")
+              xs       <- nodes.zipWithIndex.traverse{
+                case (node,index) =>
+                  for {
+                    _               <- IO.unit
+                    selectedNodeId  = node.nodeId
+                    maybePublicPort = Events.getPublicPort(events,nodeId = selectedNodeId).map(x=>( x.publicPort,x.ipAddress))
+                    res             <- maybePublicPort match {
+                      case Some((publicPort,ipAddress)) => for{
+                        _              <- IO.unit
+                        apiVersionNum  = ctx.config.apiVersion
+                        apiVersion     = s"v$apiVersionNum"
+                        usePublicPort  = ctx.config.usePublicPort
+                        usedPort       = if(!usePublicPort) "6666" else publicPort.toString
+                        returnHostname = ctx.config.returnHostname
+                        //
+                        nodeUri    = if(returnHostname) s"http://${selectedNodeId}:$usedPort/api/$apiVersion/upload" else  s"http://$ipAddress:$usedPort/api/$apiVersion/upload"
+                        timestamp  <- IO.realTime.map(_.toMillis)
+                        //            _______________________________________________
+                        balanceRes = BalanceResponse(
+                          nodeId       = selectedNodeId,
+                          dockerPort  = 6666,
+                          publicPort  = publicPort,
+                          internalIp  = ipAddress,
+                          timestamp   = timestamp,
+                          apiVersion  = apiVersionNum,
+                          dockerURL   = nodeUri,
+                          operationId = s"${operationId}_$index",
+                          objectId    = objectId,
+                          ufs         = node.ufs
+                        )
+                        //            ______________________________________
+                        resHeaders = Headers(
+                          Header.Raw(CIString("Object-Size"),objectSize.toString) ,
+                          Header.Raw(CIString("Node-Id"),selectedNodeId),
+                          Header.Raw(CIString("Public-Port"),publicPort.toString),
+                        )
+                        //              res        <- Ok(balanceRes:.asJson,resHeaders)
+                        //                  res <- Ok()
+                      } yield (balanceRes,resHeaders)
+                      case None => ctx.logger.error("NO_PUBLIC_PORT|NO_IP_ADDRESS") *> (BalanceResponse.empty,Headers.empty).pure[IO]
+                    }
+                    //            _______________________________________________________________
+                  } yield res
+              }
+              hs       = xs.map(_._2.headers).flatten
+              headers  = Headers(hs)
+              //            .foldLeft(Headers.empty)(_ ++ _)
+              balances = xs.map(_._1)
+              res      <- Ok(balances.asJson,headers)
+            } yield res
+
+          ctx.logger.debug(s"RF $rf")*>ctx.logger.debug(s"DIFF_RF $diffRF") *> (diffRF match {
+            case 0 => program
+            case x =>
+              for {
+                _                  <- ctx.logger.debug(s"Replicate $x nodes")
+                xs                 <- ctx.config.systemReplication.launchNode().replicateA(x).start
+                pendingReplication = PendingReplication(objectId = objectId, objectSize = objectSize,rf = x)
+                _                  <- ctx.state.update(s=>s.copy(pendingReplicas =  s.pendingReplicas + (objectId -> pendingReplication) ))
+                res               <- program
+              } yield res
+          })
+
+        case None =>
           for {
-          _        <- IO.unit
-          xs       <- nodes.zipWithIndex.traverse{
-            case (node,index) =>
-          for {
-            _               <- IO.unit
-            selectedNodeId  = node.nodeId
-            maybePublicPort = Events.getPublicPort(events,nodeId = selectedNodeId).map(x=>( x.publicPort,x.ipAddress))
-            res             <- maybePublicPort match {
-              case Some((publicPort,ipAddress)) => for{
-                _              <- IO.unit
-                apiVersionNum  = ctx.config.apiVersion
-                apiVersion     = s"v$apiVersionNum"
-                usePublicPort  = ctx.config.usePublicPort
-                usedPort       = if(!usePublicPort) "6666" else publicPort.toString
-                returnHostname = ctx.config.returnHostname
-                //
-                nodeUri    = if(returnHostname) s"http://${selectedNodeId}:$usedPort/api/$apiVersion/upload" else  s"http://$ipAddress:$usedPort/api/$apiVersion/upload"
-                timestamp  <- IO.realTime.map(_.toMillis)
-                //            _______________________________________________
-                balanceRes = BalanceResponse(
-                  nodeId       = selectedNodeId,
-                  dockerPort  = 6666,
-                  publicPort  = publicPort,
-                  internalIp  = ipAddress,
-                  timestamp   = timestamp,
-                  apiVersion  = apiVersionNum,
-                  dockerURL   = nodeUri,
-                  operationId = s"${operationId}_$index",
-                  objectId    = objectId,
-                  ufs         = node.ufs
-                )
-                //            ______________________________________
-                resHeaders = Headers(
-                  Header.Raw(CIString("Object-Size"),objectSize.toString) ,
-                  Header.Raw(CIString("Node-Id"),selectedNodeId),
-                  Header.Raw(CIString("Public-Port"),publicPort.toString),
-                )
-                //              res        <- Ok(balanceRes:.asJson,resHeaders)
-//                  res <- Ok()
-              } yield (balanceRes,resHeaders)
-              case None => ctx.logger.error("NO_PUBLIC_PORT|NO_IP_ADDRESS") *> (BalanceResponse.empty,Headers.empty).pure[IO]
-            }
-//            _______________________________________________________________
-          } yield res
-          }
-          hs       = xs.map(_._2.headers).flatten
-          headers  = Headers(hs)
-//            .foldLeft(Headers.empty)(_ ++ _)
-          balances = xs.map(_._1)
-          res      <- Ok(balances.asJson,headers)
-        } yield res
-        case None => for {
-          currentSignalValue <- ctx.systemReplicationSignal.get
-          _                  <- ctx.logger.debug(s"UPLOAD_SIGNAL_VALUE $currentSignalValue")
-          _                  <- if(ctx.config.systemReplicationEnabled && !currentSignalValue)
-            ctx.systemReplicationSignal.set(true) *> ctx.config.systemReplication.createNode().start.void  *> ctx.systemReplicationSignal.set(false)
-          else IO.unit
-          res <- Accepted()
+            maybeSystemRepREs <- ctx.config.systemReplication.launchNode().start
+            res               <- Accepted()
+//            res <- maybeSystemRepREs match {
+//              case Some(value) =>
+//                val nodeId = value.nodeId
+//                ctx.logger.debug(s"NEW_NODE_ADDED $nodeId")
+//                Accepted()
+//              case None => Accepted()
+//            }
         }  yield res
       }
     } yield response
@@ -185,24 +210,45 @@ object UploadControllerV2 {
       }
       //       NO EMPTY LIST OF RD's
       maybeARNodeX       = NonEmptyList.fromList(arMap.values.toList)
+//      _ <- ctx.logger.debug(s"AR $")
       nN                 = arMap.size
-      impactFactor       = authReq.req.headers.get(CIString("Impact-Factor")).flatMap(_.head.value.toDoubleOption).getOrElse(1/nN.toDouble)
+      impactFactor       = authReq.req.headers.get(CIString("Impact-Factor"))
+        .flatMap(_.head.value.toDoubleOption)
+        .map(x=> if(x==0.0) ctx.config.defaultImpactFactor else x)
+        .getOrElse(1/nN.toDouble)
+
+      rf = authReq.req.headers.get(CIString("Replication-Factor"))
+        .flatMap(_.head.value.toIntOption)
+        .getOrElse(1)
+//        .map()
       //   _______________________________________________________________________________
       uploadProgram = (nodes:NonEmptyList[NodeX]) => for {
-          _             <- IO.unit
+          _             <- ctx.logger.debug(s"AR: ${nodes.length}")
           replicaNodes  =  Events.getReplicasByObjectId(events = events,objectId = objectId)
           filteredNodes = nodes.filterNot(x=>replicaNodes.contains(x.nodeId))
-          res           <- if(filteredNodes.isEmpty) ctx.logger.debug("NO_AVAIABLE_NODES") *> Accepted()
-          else commonCode(operationId)(
+          res           <- if(filteredNodes.isEmpty) {
+              for {
+                 _                         <- ctx.logger.debug("SYSTEM_REPLICATION_ACTIVED")
+                 maybeSystemReplicationRes <- ctx.config.systemReplication.launchNode().start
+
+                res <- Accepted()
+//                res <- maybeSystemReplicationRes match {
+//                  case Some(systemRepRes) =>
+//                    val nodeId     = systemRepRes.nodeId
+//                    ctx.logger.debug(s"NEW_NODE $nodeId") *> Accepted()
+//                  case None => Accepted()
+//                }
+              } yield res
+          } else commonCode(operationId)(
             objectId   = objectId,
             objectSize = objectSize,
             userId     = user.id,
             events     = events,
             nodes      = NonEmptyList.fromListUnsafe(filteredNodes),
-            rf         = math.floor(impactFactor*nN).toInt
+            rf         =if(impactFactor == 0.0 ) rf  else math.ceil(impactFactor*nN).toInt
           )
-
         } yield res
+
       response           <- maybeObject match {
         case Some(o) => maybeARNodeX match {
           case Some(nodes) => alreadyUploaded(o,events = events) *> uploadProgram(nodes)
@@ -267,7 +313,7 @@ object UploadControllerV2 {
           _events            = selectedNodeIds.zipWithIndex.map{
             case (selectedNodeId,index) =>
             Put(
-              replication          = index > 0,
+              replication          = false,
               serialNumber         = 0,
               objectId             = objectId,
               objectSize           = objectSize,
@@ -287,7 +333,7 @@ object UploadControllerV2 {
               extension            = fileExtension
             )
           }
-          _ <- ctx.logger.debug(_events.toString)
+//          _ <- ctx.logger.debug(_events.toString)
           _                  <- Events.saveEvents(_events)
 //      ______________________________________________________________________________________
           newResponse        = response.putHeaders(

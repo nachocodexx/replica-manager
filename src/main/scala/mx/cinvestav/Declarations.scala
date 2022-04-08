@@ -7,7 +7,7 @@ import cats.effect.{FiberIO, IO, Ref}
 import mx.cinvestav.commons.balancer.v2.Balancer
 import mx.cinvestav.commons.status.Status
 import mx.cinvestav.config.{DefaultConfig, NodeInfo}
-import mx.cinvestav.commons.types.{NodeUFs, NodeX}
+import mx.cinvestav.commons.types.{NodeUFs, NodeX, PendingReplication}
 import mx.cinvestav.commons.balancer.v3.{Balancer => BalancerV3}
 import mx.cinvestav.commons.events.{AddedNode, Del, Downloaded, EventX, Evicted, Get, GetCompleted, Missed, ObjectHashing, Push, Put, PutCompleted, RemovedNode, Replicated, UpdatedNodePort, Uploaded, Pull => PullEvent, TransferredTemperature => SetDownloads}
 import mx.cinvestav.events.Events.{GetInProgress, HotObject, MeasuredServiceTime, MonitoringStats, UpdatedNetworkCfg}
@@ -142,16 +142,18 @@ object Declarations {
   case class NodeState(
                         status:Status,
                         ip:String,
-                        lb:Option[Balancer[NodeX]]=None,
-                        uploadBalancer:Option[BalancerV3]=None,
-                        downloadBalancer:Option[BalancerV3]=None,
+//                        lb:Option[Balancer[NodeX]]=None,
+//                        uploadBalancer:Option[BalancerV3]=None,
+//                        downloadBalancer:Option[BalancerV3]=None,
                         downloadBalancerToken:String="ROUND_ROBIN",
                         uploadBalancerToken:String="ROUND_ROBIN",
-                        extraDownloadBalancer:Option[BalancerV3]= None,
+//                        extraDownloadBalancer:Option[BalancerV3]= None,
                         events:List[EventX] = Nil,
-                        monitoringEvents:List[EventX]= Nil,
-                        monitoringEx:Map[String,EventX]= Map.empty[String,EventX],
-                        infos:List[Monitoring.NodeInfo] = Nil
+                        pendingReplicas:Map[String,PendingReplication] = Map.empty[String,PendingReplication],
+                        misses:Map[String,Int] = Map.empty[String,Int]
+//                        monitoringEvents:List[EventX]= Nil,
+//                        monitoringEx:Map[String,EventX]= Map.empty[String,EventX],
+//                        infos:List[Monitoring.NodeInfo] = Nil
 //                        systemRepSignal:SignallingRef[IO,Boolean],
 //                        systemSemaphore:Semaphore[IO],
 //                        serviceReplicationDaemon:Boolean,

@@ -433,17 +433,6 @@ object Events {
     }
   } yield()
 
-  def saveMonitoringEvents(event:EventX)(implicit ctx:NodeContext) = for {
-    currentState     <- ctx.state.get
-    //    currentEvents    = currentState.monitoringEvents
-    currentEvents    = currentState.monitoringEx
-    lastSerialNumber = currentEvents.minByOption(_._2.serialNumber).map(_._2.asInstanceOf[MonitoringStats]).map(_.serialNumber.toInt).getOrElse(0)
-    transformeEvent <- sequentialMonotonic(lastSerialNumber ,events=event::Nil).map(_.head)
-    xs               = currentState.monitoringEx.updatedWith(event.nodeId)(x=> transformeEvent.some)
-    _ <- ctx.state.update(s=>s.copy(monitoringEx = xs ))
-//    _                <- ctx.state.update{ s=>s.copy(monitoringEvents =  s.monitoringEvents ++ transformeEvents )}
-  } yield()
-
 //
   def getObjectSize(objectId:String,events:List[EventX]) =
     onlyPutos(events = events)

@@ -18,7 +18,6 @@ object ResetController {
     case POST@req -> Root / "reset" =>
       for {
         _            <- ctx.logger.debug("RESET")
-        lb           <- Helpers.initLoadBalancerV3(balancerToken = ctx.config.uploadLoadBalancer)
         currentState <- ctx.state.get
         nodes        = Events.getAllNodeXs(events=currentState.events)
         _            <- ctx.state.update{ s=>
@@ -29,9 +28,6 @@ object ResetController {
               case _:Events.UpdatedNetworkCfg => true
               case _=>false
             },
-            uploadBalancer = lb.some,
-            monitoringEvents = Nil,
-            monitoringEx = Map.empty[String,EventX]
           )
 
         }
