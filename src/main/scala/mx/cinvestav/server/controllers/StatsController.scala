@@ -18,6 +18,11 @@ import org.http4s.circe.CirceEntityEncoder._
 import io.circe._
 import io.circe.generic.auto._
 import io.circe.syntax._
+//
+import breeze.linalg._
+import breeze.stats.{mean, median}
+import breeze.stats.median.reduce_Double
+//import breeze.i
 
 object StatsController {
 
@@ -27,6 +32,7 @@ object StatsController {
     HttpRoutes.of[IO]{
       case GET -> Root / "stats" =>
         val program = for {
+        _                  <- IO.unit
         currentState       <- ctx.state.get
         rawEvents          = currentState.events
         events             = Events.orderAndFilterEventsMonotonicV2(events = rawEvents)
@@ -49,7 +55,35 @@ object StatsController {
           .toMap
           .asJson
 //      ________________________________________________________
-        serviceTimeByNode  = Events.getAvgServiceTimeByNode(events=events)
+        _ <- IO.unit
+        queueInfo = EventXOps.processQueueTimes(events = events)
+        queueInfoByNode = nodeIds.map(nodeId =>
+          nodeId -> EventXOps.processQueueTimes(events = events,nodeFilterFn = _.nodeId == nodeId)).toMap
+//        putsATs                = puts.map(_.monotonicTimestamp)
+//        putsSTs                = puts.map(_.serviceTimeNanos)
+//        putsQueueTimes         = EventXOps.calculateQueueTimes(arrivalTimes = putsATs,serviceTimes = putsSTs)
+//        putsServicesTimes      = DenseVector.apply(putsQueueTimes.map(_.serviceTime.toDouble).toArray)
+//        putsMeanServiceTime   = mean(putsServicesTimes)
+//        putsMedianServiceTime = median(putsServicesTimes)
+////
+//        putsWaitingTimes       = DenseVector.apply(putsQueueTimes.map(_.waitingTime.toDouble).toArray)
+//        putsMeanWaitingTime   = mean(putsWaitingTimes)
+//        putsMedianWaitingTime = median(putsWaitingTimes)
+//
+////     ________________________________________________________
+//        _ <- IO.unit
+//        gets              = EventXOps.onlyGets(events = events)
+//        getsATs           = gets.map(_.monotonicTimestamp)
+//        getsSTs           = gets.map(_.serviceTimeNanos)
+//        getsQueueTimes    = EventXOps.calculateQueueTimes(arrivalTimes = getsATs,serviceTimes = getsSTs)
+////      ______________________________________________________________________________________________________________________________________________
+//        _ <- IO.unit
+//        global            = (puts ++ gets)
+//        globalATs         = global.map(_.monotonicTimestamp)
+//        globalSTs         = global.map(_.serviceTimeNanos)
+//        globalQueueTimes  = EventXOps.calculateQueueTimes(arrivalTimes = globalATs,serviceTimes = globalSTs)
+//      ______________________________________________________________________________________________________________________________________________
+        _ <- IO.unit
         stats              = Map(
           "nodeId"                   -> ctx.config.nodeId.asJson,
           "port"  -> ctx.config.port.asJson,
@@ -67,8 +101,10 @@ object StatsController {
             "download" -> currentState.downloadBalancerToken.asJson,
             "upload" -> currentState.uploadBalancerToken.asJson
           ),
-          "serviceTimes" -> serviceTimeByNode.asJson,
-          "apiVersion" -> ctx.config.apiVersion.asJson
+          "apiVersion" -> ctx.config.apiVersion.asJson,
+          "queue" -> queueInfo.asJson,
+          "queueByNode" -> queueInfoByNode.asJson
+
         )
         response <- Ok(stats)
       } yield response

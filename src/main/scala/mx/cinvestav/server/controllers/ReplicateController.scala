@@ -45,6 +45,7 @@ object ReplicateController {
             }
             ar              = availableNodes.size
             rfDiff          = ar - rf
+//
             _               <- if(rfDiff < 0) {
               for {
                 _ <- ctx.logger.debug(s"CREATE_NODES ${rfDiff*(-1)}")
@@ -52,9 +53,11 @@ object ReplicateController {
                   _ <- ctx.systemReplicationSignal
                 } yield ()
               } yield ()
-            } else {
+            }
+//
+            else {
               for {
-                _ <- ctx.logger.debug(s"REPLICATE $rf ${}")
+                _ <- ctx.logger.debug(s"REPLICATE $objectId $rf")
               } yield ()
             }
             res <- Accepted()

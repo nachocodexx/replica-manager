@@ -323,7 +323,7 @@ object UploadControllerV2 {
               userId               = user.id,
               serviceTimeEnd       = serviceTimeEnd,
               serviceTimeStart     = serviceTimeStart,
-              correlationId        = s"${operationId}_$index",
+              correlationId        = s"${operationId}_$blockIndex",
               monotonicTimestamp   = 0L,
               blockId              = blockId,
               catalogId            = catalogId,
