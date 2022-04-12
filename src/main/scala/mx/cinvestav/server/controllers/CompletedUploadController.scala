@@ -7,6 +7,7 @@ import mx.cinvestav.commons.events.{Get, GetCompleted, Put, PutCompleted}
 import mx.cinvestav.events.Events
 import org.http4s.HttpRoutes
 import org.http4s.dsl.io._
+import org.typelevel.ci.CIString
 //{->, /, InternalServerError, NoContent, NotFound, POST, Root}
 import mx.cinvestav.commons.events.EventXOps
 
@@ -19,13 +20,17 @@ object CompletedUploadController {
         currentState <- ctx.state.get
         //      ________________________________________________________________________
         events       = Events.filterEventsMonotonicV2(events = currentState.events)
-        puts         = Events.onlyPutos(events = events).map(_.asInstanceOf[Put])
+        puts         = EventXOps.onlyPuts(events = events).map(_.asInstanceOf[Put])
+        headers      = req.headers
+        nodeId       = headers.get(CIString("Node-Id")).map(_.head.value).getOrElse("NODE_ID")
         _            <- ctx.logger.debug(s"OPERATION_ID $operationId")
         _            <- ctx.logger.debug(s"OBJECT_ID $objectId")
         _            <- ctx.logger.debug(s"BLOCK_INDEX $blockIndex")
+        _            <- ctx.logger.debug(s"NODE_ID $nodeId")
         _            <- ctx.logger.debug(puts.toString)
         operationBlockId      = s"${operationId}_$blockIndex"
-        maybePut     = puts.find(p => p.correlationId == operationBlockId && p.objectId == objectId)
+        maybePut     = puts.find(p => p.correlationId == operationBlockId && p.objectId == objectId && p.nodeId == nodeId)
+        _<-ctx.logger.debug(maybePut.toString)
         //      ________________________________________________________________________
         res          <- maybePut match {
           case Some(put) => for {

@@ -94,6 +94,7 @@ object UploadControllerV2 {
     userId:String,
     events:List[EventX],
     nodes:NonEmptyList[NodeX],
+    blockIndex:Int =0,
     rf:Int = 1
   )(implicit ctx:NodeContext) = {
     for {
@@ -132,7 +133,7 @@ object UploadControllerV2 {
                           timestamp   = timestamp,
                           apiVersion  = apiVersionNum,
                           dockerURL   = nodeUri,
-                          operationId = s"${operationId}_$index",
+                          operationId = s"${operationId}_$blockIndex",
                           objectId    = objectId,
                           ufs         = node.ufs
                         )
@@ -185,11 +186,15 @@ object UploadControllerV2 {
     } yield response
   }
 
-  def controller(operationId:String,objectId:String)(
+  def controller(
+                  operationId:String,
+                  objectId:String,
+                  blockIndex:Int = 0
+                )(
     authReq:AuthedRequest[IO,User],
     user:User,
     rawEvents:List[EventX]=Nil,
-    events:List[EventX]=Nil
+    events:List[EventX]=Nil,
   )(implicit ctx:NodeContext) =
     for {
       currentState       <- ctx.state.get
@@ -245,7 +250,8 @@ object UploadControllerV2 {
             userId     = user.id,
             events     = events,
             nodes      = NonEmptyList.fromListUnsafe(filteredNodes),
-            rf         =if(impactFactor == 0.0 ) rf  else math.ceil(impactFactor*nN).toInt
+            rf         =if(impactFactor == 0.0 ) rf  else math.ceil(impactFactor*nN).toInt,
+            blockIndex = blockIndex
           )
         } yield res
 
@@ -292,14 +298,15 @@ object UploadControllerV2 {
           blockId              = s"${objectId}_${blockIndex}"
           latency              = serviceTimeStart - requestStartAt
             //      ______________________________________________________________________________________________________________
-          _                  <- ctx.logger.debug(s"LATENCY $objectId $latency")
-          _                  <- ctx.logger.debug(s"ARRIVAL_TIME $objectId $serviceTimeStart")
+          _                    <- ctx.logger.debug(s"LATENCY $objectId $latency")
+          _                    <- ctx.logger.debug(s"ARRIVAL_TIME $objectId $serviceTimeStart")
 //      ______________________________________________________________________________________________________________
-          _                  <- ctx.logger.debug(s"SERVICE_TIME_START $objectId $serviceTimeStart")
+          _                    <- ctx.logger.debug(s"SERVICE_TIME_START $objectId $serviceTimeStart")
 //        ___________________________________________________________________________________
-          response           <- controller(
-            operationId=operationId,
-            objectId=objectId,
+          response             <- controller(
+            operationId = operationId,
+            objectId    = objectId,
+            blockIndex  = blockIndex
           )(authReq=authReq,user=user, rawEvents=rawEvents, events=events)
 //        _____________________________________________________________
           serviceTimeEnd     <- monotonic

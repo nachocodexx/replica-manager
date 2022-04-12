@@ -93,10 +93,16 @@ object DownloadControllerV2 {
       val filteredLocationNodeIds = filteredNodes.map(_.nodeId)
       val _locationNodeIds        = NonEmptyList.fromListUnsafe(filteredLocationNodeIds)
       ctx.config.downloadLoadBalancer match {
+        case "LEAST_HIT" =>
+          val defaultCounter   = filteredLocationNodeIds.map(_ -> 0).toMap
+          val counter          = gets.groupBy(_.nodeId).map(x=> x._1-> x._2.length).filter(x=> _locationNodeIds.contains_(x._1)) |+| defaultCounter
+          val maybeSelectedNodeId  = counter.minByOption(_._2).map(_._1)
+          maybeSelectedNodeId.flatMap(arMap.get)
         case "ROUND_ROBIN"   =>
           val counter          = gets.groupBy(_.nodeId).map(x=> x._1-> x._2.length).filter(x=> _locationNodeIds.contains_(x._1))
           val selectedNodeId   = deterministic.RoundRobin(nodeIds = _locationNodeIds).balanceWith(nodeIds = _locationNodeIds,counter = counter)
-          arMap.get(selectedNodeId)
+          val x = arMap.get(selectedNodeId)
+          x
         case "PSEUDO_RANDOM" =>
           val selectedNodeId = deterministic.PseudoRandom(nodeIds = _locationNodeIds).balance
           arMap.get(selectedNodeId)
