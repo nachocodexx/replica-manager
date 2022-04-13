@@ -81,7 +81,6 @@ object DownloadControllerV2 {
       } yield newResponse
   }
   //  ____________________________________________________________________
-
   def balance(locations:List[String],arMap:Map[String,NodeX],objectSize:Long,gets:List[EventX])(implicit ctx:NodeContext) = {
     val locationNodes           = locations.map(arMap)
     val filteredNodes           = locationNodes.filter(_.availableMemoryCapacity >= objectSize)
