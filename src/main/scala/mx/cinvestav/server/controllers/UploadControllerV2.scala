@@ -292,6 +292,7 @@ object UploadControllerV2 {
           filePath             = headers.get(CIString("File-Path")).map(_.head.value).getOrElse(s"$objectId.$fileExtension")
           compressionAlgorithm = headers.get(CIString("Compression-Algorithm")).map(_.head.value).getOrElse("")
           requestStartAt       = headers.get(CIString("Request-Start-At")).map(_.head.value).flatMap(_.toLongOption).getOrElse(serviceTimeStart)
+          arrivalTime          = headers.get(CIString("Arrival-Time")).map(_.head.value).flatMap(_.toLongOption).getOrElse(serviceTimeStart)
           catalogId            = headers.get(CIString("Catalog-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
           digest               = headers.get(CIString("Digest")).map(_.head.value).getOrElse("")
           blockIndex           = headers.get(CIString("Block-Index")).map(_.head.value).flatMap(_.toIntOption).getOrElse(0)
@@ -337,7 +338,8 @@ object UploadControllerV2 {
               realPath             = filePath,
               digest               = digest,
               compressionAlgorithm = compressionAlgorithm,
-              extension            = fileExtension
+              extension            = fileExtension,
+              arrivalTime          = arrivalTime
             )
           }
 //          _ <- ctx.logger.debug(_events.toString)

@@ -4,6 +4,7 @@ import cats.data.NonEmptyList
 import cats.effect._
 import cats.effect.std.Semaphore
 import cats.implicits._
+import mx.cinvestav.commons.events.GetCompleted
 import mx.cinvestav.commons.types.BalanceResponse
 //
 import mx.cinvestav.commons.balancer.{deterministic,nondeterministic}
@@ -94,8 +95,11 @@ object DownloadControllerV2 {
       ctx.config.downloadLoadBalancer match {
         case "LEAST_HIT" =>
           val defaultCounter   = filteredLocationNodeIds.map(_ -> 0).toMap
-          val counter          = gets.groupBy(_.nodeId).map(x=> x._1-> x._2.length).filter(x=> _locationNodeIds.contains_(x._1)) |+| defaultCounter
-          val maybeSelectedNodeId  = counter.minByOption(_._2).map(_._1)
+          val counter          = gets.groupBy(_.nodeId)
+            .map(x=> x._1-> x._2.length)
+            .filter(x=> _locationNodeIds.contains_(x._1))
+          val _counter = counter |+| defaultCounter
+          val maybeSelectedNodeId  = _counter.minByOption(_._2).map(_._1)
           maybeSelectedNodeId.flatMap(arMap.get)
         case "ROUND_ROBIN"   =>
           val counter          = gets.groupBy(_.nodeId).map(x=> x._1-> x._2.length).filter(x=> _locationNodeIds.contains_(x._1))
@@ -124,7 +128,8 @@ object DownloadControllerV2 {
       _                     <- IO.unit
       //    __________________________________________________
       events                  = x.events
-      gets                    = EventXOps.onlyGetCompleteds(events = events)
+      gets                    = EventXOps.onlyGetCompleteds(events = events).asInstanceOf[List[GetCompleted]]
+      _gets                   = gets.filter(_.objectId == x.objectId)
       userId                  = x.userId
       objectId                = x.objectId
       objectSize              = x.objectSize
@@ -135,7 +140,7 @@ object DownloadControllerV2 {
         locations  = locations,
         arMap      = arMap,
         objectSize = objectSize,
-        gets       = gets
+        gets       = _gets
       )
 //      filteredNodes           = locationNodes.filter(_.availableMemoryCapacity >= objectSize)
 //      filteredLocationUfs     = filteredNodes.map(_.ufs)
@@ -353,6 +358,7 @@ object DownloadControllerV2 {
           operationId          = headers.get(CIString("Operation-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
           objectSize           = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(0L)
           requestStartAt       = headers.get(CIString("Request-Start-At")).map(_.head.value).flatMap(_.toLongOption).getOrElse(serviceTimeStart)
+          arrivalTime          = headers.get(CIString("Arrival-Time")).map(_.head.value).flatMap(_.toLongOption).getOrElse(serviceTimeStart)
           latency              = serviceTimeStart - requestStartAt
           dumbObject           = DumbObject(objectId = objectId, objectSize = objectSize)
           //      _________________________________________________________________________
@@ -377,7 +383,7 @@ object DownloadControllerV2 {
               correlationId    = operationId,
               serviceTimeEnd   = serviceTimeEnd,
               serviceTimeStart = serviceTimeStart,
-              //          waitingTime      = waitingTime
+              arrivalTime      = arrivalTime
             )
              Events.saveEvents(events = get::Nil) *> ctx.logger.info(s"DOWNLOAD $objectId $selectedNodeId $serviceTime $operationId")
           } else ctx.logger.debug(s"NO_AVAILABLE_NODE $operationId $objectId")

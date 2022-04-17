@@ -55,17 +55,11 @@ object StatsController {
           .toMap
           .asJson
 //      ________________________________________________________
-        _ <- IO.unit
+//        _ <- ctx.logger.debug("AFTER_QUEUE 0")
         queueInfo = EventXOps.processQueueTimes(events = events)
+//        _<- ctx.logger.debug("QUEUE 0")
         queueInfoByNode = nodeIds.map(nodeId =>
           nodeId -> EventXOps.processQueueTimes(events = events,nodeFilterFn = _.nodeId == nodeId)).toMap
-//        putsATs                = puts.map(_.monotonicTimestamp)
-//        putsSTs                = puts.map(_.serviceTimeNanos)
-//        putsQueueTimes         = EventXOps.calculateQueueTimes(arrivalTimes = putsATs,serviceTimes = putsSTs)
-//        putsServicesTimes      = DenseVector.apply(putsQueueTimes.map(_.serviceTime.toDouble).toArray)
-//        putsMeanServiceTime   = mean(putsServicesTimes)
-//        putsMedianServiceTime = median(putsServicesTimes)
-////
 //        putsWaitingTimes       = DenseVector.apply(putsQueueTimes.map(_.waitingTime.toDouble).toArray)
 //        putsMeanWaitingTime   = mean(putsWaitingTimes)
 //        putsMedianWaitingTime = median(putsWaitingTimes)
