@@ -737,6 +737,15 @@ object Events {
 //    .map(_.objectId).distinct
 
 
+
+  def generateDistributionSchemaV3(events:List[EventX]): Map[String, List[String]] = {
+    val completeds      = EventXOps.onlyPuts(events = events).map(_.asInstanceOf[Put])
+    val completedsGroup = completeds.groupBy(_.objectId)
+    val schma  = completedsGroup.map{
+      case (str, value) => str -> value.map(_.nodeId)
+    }
+    schma
+  }
   def generateDistributionSchema(events:List[EventX]): Map[String, List[String]] = {
     val completeds      = EventXOps.onlyPutCompleteds(events = events).map(_.asInstanceOf[PutCompleted])
 //    val pendings        = EventXOps.onlyPendingPuts(events = events)

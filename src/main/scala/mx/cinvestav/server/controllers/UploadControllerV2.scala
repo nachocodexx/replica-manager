@@ -95,7 +95,8 @@ object UploadControllerV2 {
     events:List[EventX],
     nodes:NonEmptyList[NodeX],
     blockIndex:Int =0,
-    rf:Int = 1
+    rf:Int = 1,
+    replicationTechique:String = "ACTIVE"
   )(implicit ctx:NodeContext) = {
     for {
       _                  <- IO.unit
@@ -164,7 +165,8 @@ object UploadControllerV2 {
               for {
                 _                  <- ctx.logger.debug(s"Replicate $x nodes")
                 xs                 <- ctx.config.systemReplication.launchNode().replicateA(x).start
-                pendingReplication = PendingReplication(objectId = objectId, objectSize = objectSize,rf = x)
+//                replicationMethod  = ""
+                pendingReplication = PendingReplication(objectId = objectId, objectSize = objectSize,rf = x,replicationTechique)
                 _                  <- ctx.state.update(s=>s.copy(pendingReplicas =  s.pendingReplicas + (objectId -> pendingReplication) ))
                 res               <- program
               } yield res
@@ -197,10 +199,11 @@ object UploadControllerV2 {
     events:List[EventX]=Nil,
   )(implicit ctx:NodeContext) =
     for {
-      currentState       <- ctx.state.get
-      req                = authReq.req
-      headers            = req.headers
-      objectSize         = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(0L)
+      currentState         <- ctx.state.get
+      req                  = authReq.req
+      headers              = req.headers
+      objectSize           = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(0L)
+      replicationTechnique = headers.get(CIString("Replication-Technique")).map(_.head.value).getOrElse("ACTIVE")
 
       maybeObject        = Events.getObjectByIdV3(objectId = objectId,operationId =operationId ,events=events)
       arMap              = ctx.config.uploadLoadBalancer match {
@@ -237,12 +240,6 @@ object UploadControllerV2 {
                  maybeSystemReplicationRes <- ctx.config.systemReplication.launchNode().start
 
                 res <- Accepted()
-//                res <- maybeSystemReplicationRes match {
-//                  case Some(systemRepRes) =>
-//                    val nodeId     = systemRepRes.nodeId
-//                    ctx.logger.debug(s"NEW_NODE $nodeId") *> Accepted()
-//                  case None => Accepted()
-//                }
               } yield res
           } else commonCode(operationId)(
             objectId   = objectId,
@@ -251,7 +248,8 @@ object UploadControllerV2 {
             events     = events,
             nodes      = NonEmptyList.fromListUnsafe(filteredNodes),
             rf         =if(impactFactor == 0.0 ) rf  else math.ceil(impactFactor*nN).toInt,
-            blockIndex = blockIndex
+            blockIndex = blockIndex,
+            replicationTechique = replicationTechnique
           )
         } yield res
 

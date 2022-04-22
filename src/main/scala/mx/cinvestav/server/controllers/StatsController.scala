@@ -2,7 +2,7 @@ package mx.cinvestav.server.controllers
 
 import cats.implicits._
 import cats.effect._
-import mx.cinvestav.commons.events.{EventXOps, UpdatedNodePort}
+import mx.cinvestav.commons.events.{EventXOps, Get, Put, UpdatedNodePort}
 import org.typelevel.ci.CIString
 
 import scala.collection.immutable.ListMap
@@ -56,10 +56,28 @@ object StatsController {
           .asJson
 //      ________________________________________________________
 //        _ <- ctx.logger.debug("AFTER_QUEUE 0")
-        queueInfo = EventXOps.processQueueTimes(events = events)
+        queueInfo = EventXOps.processQueueTimes(
+          events         = events,
+          nodeFilterFn   = _=> true,
+          mapArrivalTime = e => e match {
+            case p:Put => p.arrivalTime
+            case p:Get => p.arrivalTime
+            case e     => e.monotonicTimestamp
+          }
+        )
 //        _<- ctx.logger.debug("QUEUE 0")
         queueInfoByNode = nodeIds.map(nodeId =>
-          nodeId -> EventXOps.processQueueTimes(events = events,nodeFilterFn = _.nodeId == nodeId)).toMap
+          nodeId -> EventXOps.processQueueTimes(
+            events = events,
+            nodeFilterFn = _.nodeId == nodeId,
+            mapArrivalTime = e => e match {
+              case p:Put => p.arrivalTime
+              case p:Get => p.arrivalTime
+              case e     => e.monotonicTimestamp
+            }
+
+          ),
+        ).toMap
 //        putsWaitingTimes       = DenseVector.apply(putsQueueTimes.map(_.waitingTime.toDouble).toArray)
 //        putsMeanWaitingTime   = mean(putsWaitingTimes)
 //        putsMedianWaitingTime = median(putsWaitingTimes)
