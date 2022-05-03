@@ -43,7 +43,7 @@ object StatsController {
               metadata = node.metadata ++ Map("PUBLIC_PORT"->publicPort.toString)
             )
         }
-        distributionSchema = Events.generateDistributionSchemaV2(events = events,ctx.config.replicationMethod)
+        distributionSchema = Events.generateDistributionSchemaV2(events = events,ctx.config.replicationTechnique)
         objectsIds         = Events.getObjectIds(events = events)
         hitCounter         = Events.getHitCounterByNode(events = events)
         hitRatioInfo       = Events.getGlobalHitRatio(events=events)

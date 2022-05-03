@@ -203,7 +203,7 @@ object UploadControllerV2 {
       req                  = authReq.req
       headers              = req.headers
       objectSize           = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(0L)
-      replicationTechnique = headers.get(CIString("Replication-Technique")).map(_.head.value).getOrElse("ACTIVE")
+      replicationTechnique = headers.get(CIString("Replication-Technique")).map(_.head.value).getOrElse(currentState.replicationTechnique)
 
       maybeObject        = Events.getObjectByIdV3(objectId = objectId,operationId =operationId ,events=events)
       arMap              = ctx.config.uploadLoadBalancer match {

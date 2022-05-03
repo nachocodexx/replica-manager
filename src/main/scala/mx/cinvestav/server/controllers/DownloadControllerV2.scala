@@ -254,7 +254,7 @@ object DownloadControllerV2 {
     maybePendingDownload = EventXOps.pendingGetByOperationId(events = events, operationId = operationId)
     downloadProgram      = for{
         _                    <- IO.unit
-        schema               = Events.generateDistributionSchemaV2(events = events,ctx.config.replicationMethod)
+        schema               = Events.generateDistributionSchemaV2(events = events,ctx.config.replicationTechnique)
         arMap                = EventXOps.getAllNodeXs(events = events,objectSize = objectSize).map(x=>x.nodeId->x).toMap
         maybeLocations       = schema.get(objectId)
         preDownloadParams    = PreDownloadParams(
@@ -289,7 +289,7 @@ object DownloadControllerV2 {
     currentState      <- ctx.state.get
     rawEvents         = currentState.events
     events            = Events.orderAndFilterEventsMonotonicV2(rawEvents)
-    schema            = Events.generateDistributionSchemaV2(events = events,ctx.config.replicationMethod)
+    schema            = Events.generateDistributionSchemaV2(events = events,ctx.config.replicationTechnique)
     arMap             = EventXOps.getAllNodeXs(events = events).map(x=>x.nodeId->x).toMap
     objects           = EventXOps
       .onlyPutCompleteds(events = events)

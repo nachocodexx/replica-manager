@@ -30,7 +30,7 @@ object CompletedUploadController {
         _            <- ctx.logger.debug(puts.toString)
         operationBlockId      = s"${operationId}_$blockIndex"
         maybePut     = puts.find(p => p.correlationId == operationBlockId && p.objectId == objectId && p.nodeId == nodeId)
-        _<-ctx.logger.debug(maybePut.toString)
+        _<-ctx.logger.debug("MAYBE_PUT "+maybePut.toString)
         //      ________________________________________________________________________
         res          <- maybePut match {
           case Some(put) => for {
@@ -42,6 +42,7 @@ object CompletedUploadController {
           //          ________________________________________________________________________
           case None => NotFound()
         }
+        _  <- ctx.logger.debug("__________________________________________________")
       } yield res
       program.handleErrorWith{ e =>
         ctx.errorLogger.error(e.getMessage) *> InternalServerError()

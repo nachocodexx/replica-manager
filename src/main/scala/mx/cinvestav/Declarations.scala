@@ -142,30 +142,14 @@ object Declarations {
   case class NodeState(
                         status:Status,
                         ip:String,
-//                        lb:Option[Balancer[NodeX]]=None,
-//                        uploadBalancer:Option[BalancerV3]=None,
-//                        downloadBalancer:Option[BalancerV3]=None,
                         downloadBalancerToken:String="ROUND_ROBIN",
                         uploadBalancerToken:String="ROUND_ROBIN",
-//                        extraDownloadBalancer:Option[BalancerV3]= None,
                         events:List[EventX] = Nil,
                         pendingReplicas:Map[String,PendingReplication] = Map.empty[String,PendingReplication],
-                        misses:Map[String,Int] = Map.empty[String,Int]
-//                        monitoringEvents:List[EventX]= Nil,
-//                        monitoringEx:Map[String,EventX]= Map.empty[String,EventX],
-//                        infos:List[Monitoring.NodeInfo] = Nil
-//                        systemRepSignal:SignallingRef[IO,Boolean],
-//                        systemSemaphore:Semaphore[IO],
-//                        serviceReplicationDaemon:Boolean,
-//                        serviceReplicationThreshold:Double,
-//                        maxAR:Int,
-//                        maxRF:Int,
-//                        balanceTemperature:Boolean,
-//                        replicationDaemon:Boolean,
-//                        replicationDaemonDelayMillis:Long,
-//                        replicationStrategy:String,
-//                        experimentId:String,
-//                        replicationDaemonSingal:SignallingRef[IO,Boolean],
+                        misses:Map[String,Int] = Map.empty[String,Int],
+                        replicationFactor:Int = 0,
+                        availableResources:Int = 5,
+                        replicationTechnique:String = "ACTIVE"
                         )
   case class NodeContext(
                             config: DefaultConfig,

@@ -31,7 +31,7 @@ object AddNode {
       rawEvents        = currentState.events
       events           = Events.orderAndFilterEventsMonotonicV2(events = rawEvents)
       nodes            = Events.onlyAddedNode(events=events)
-      maxAR            = 5
+      maxAR            = ctx.config.availableResources
       response         <- if(nodes.length < maxAR) for {
         payload        <- req.as[AddedService]
         eventId        = UUID.randomUUID()

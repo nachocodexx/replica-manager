@@ -102,27 +102,11 @@ case class SystemReplication(protocol:String="http", ip:String="127.0.0.1", host
 
 case class DefaultConfig(
                           port:Int,
-//                          maxRf:Int,
-//                          maxAr:Int,
                           nodeId:String,
                           host:String,
                           systemReplication:SystemReplication,
-//                          serviceReplicationDaemon:Boolean,
-//                          serviceReplicationThreshold:Double,
-//                          serviceReplicationDaemonDelay:Long,
-//                          replicationDaemon:Boolean,
-//                          replicationDaemonDelayMillis:Long,
-//                          balanceTemperature:Boolean,
                           uploadLoadBalancer:String,
-//                          ="UF",
                           downloadLoadBalancer:String,
-//                          "LEAST_DOWNLOADS",
-//                          defaultCacheSize:Int,
-//                          defaultCachePolicy:String,
-//                          defaultCachePort:Int,
-//                          hostLogPath:String,
-//                          dataReplicationStrategy:String="static",
-//                          dataReplicationIntervalMs:Long=10000,
                           returnHostname:Boolean,
                           cloudEnabled:Boolean,
                           hasNextPool:Boolean,
@@ -134,8 +118,11 @@ case class DefaultConfig(
                           bufferSize:Int,
                           responseHeaderTimeoutMs:Long,
                           nSemaphore:Int = 1,
-                          replicationMethod:String,
+                          replicationTechnique:String,
                           systemReplicationEnabled:Boolean,
-                          defaultImpactFactor:Double = 0.0
+                          defaultImpactFactor:Double = 0.0,
+                          availableResources:Int,
+                          replicationFactor:Int,
+                          elasticity:Boolean
                           //                          rabbitmq: RabbitMQClusterConfig
                         )
