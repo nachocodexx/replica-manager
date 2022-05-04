@@ -34,6 +34,7 @@ object StatsController {
         val program = for {
         _                  <- IO.unit
         currentState       <- ctx.state.get
+        pendingReplicas    = currentState.pendingReplicas.filter(_._2.rf>0)
         rawEvents          = currentState.events
         events             = Events.orderAndFilterEventsMonotonicV2(events = rawEvents)
         ars                = EventXOps.getAllNodeXs(events=events).map { node =>
@@ -115,7 +116,8 @@ object StatsController {
           ),
           "apiVersion" -> ctx.config.apiVersion.asJson,
           "queue" -> queueInfo.asJson,
-          "queueByNode" -> queueInfoByNode.asJson
+          "queueByNode" -> queueInfoByNode.asJson,
+          "pendingReplication" -> pendingReplicas.asJson
 
         )
         response <- Ok(stats)

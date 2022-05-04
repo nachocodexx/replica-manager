@@ -142,36 +142,6 @@ object DownloadControllerV2 {
         objectSize = objectSize,
         gets       = _gets
       )
-//      filteredNodes           = locationNodes.filter(_.availableMemoryCapacity >= objectSize)
-//      filteredLocationUfs     = filteredNodes.map(_.ufs)
-//      //      _____________________________________________________________________________________________________________________________________
-//      maybeSelectedNode     = if(filteredNodes.isEmpty) None
-//      else if(filteredNodes.length == 1) subsetNodes.head.some
-//      else {
-//        val filteredLocationNodeIds = filteredNodes.map(_.nodeId)
-//        val _locationNodeIds        = NonEmptyList.fromListUnsafe(filteredLocationNodeIds)
-//        ctx.config.downloadLoadBalancer match {
-//          case "ROUND_ROBIN"   =>
-////            val counter          = gets.groupBy(_.nodeId).map(x=> x._1-> x._2.length).filter(x=> _locationNodeIds.contains_(x._1))
-//            val counter                 = gets.groupBy(_.nodeId).map(x=> x._1-> x._2.length).filter(x=> _locationNodeIds.contains_(x._1))
-//            val selectedNodeId   = deterministic.RoundRobin(nodeIds = _locationNodeIds).balanceWith(nodeIds = _locationNodeIds,counter = counter)
-//            arMap.get(selectedNodeId)
-//          case "PSEUDO_RANDOM" =>
-//            val selectedNodeId = deterministic.PseudoRandom(nodeIds = _locationNodeIds).balance
-//            arMap.get(selectedNodeId)
-//          case "TWO_CHOICES"   =>
-//            val psrnd               = deterministic.PseudoRandom(nodeIds = _locationNodeIds)
-//            val maybeSelectedNodeId = nondeterministic.TwoChoices(psrnd = psrnd)
-//              .balances(ufs =  filteredLocationUfs,mapUf = _.memoryUF)
-//              .headOption
-//            maybeSelectedNodeId.flatMap(arMap.get)
-//          case "SORTING_UF" =>
-//            val maybeSelectedNodeId = nondeterministic.SortingUF()
-//              .balance(ufs = filteredLocationUfs,mapUf = _.memoryUF)
-//              .headOption
-//            maybeSelectedNodeId.flatMap(arMap.get)
-//        }
-//      }
       //      _____________________________________________________________________________________________________________________________________
       _                     <- ctx.logger.debug(s"SELECTED_NODE $maybeSelectedNode")
       response              <- maybeSelectedNode match {

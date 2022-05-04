@@ -63,13 +63,13 @@ object Daemon {
           }
         case None => Nil
       }
-      _               <- ctx.logger.debug(s"REPLICA_PUTS $newPuts")
+//      _               <- ctx.logger.debug(s"REPLICA_PUTS $newPuts")
       _               <- Events.saveEvents(events = newPuts)
       operationIdsH   = newPuts.map{ x =>Header.Raw(CIString("Operation-Id"),x.operationId)}
       replicaNodeH    = selectedNodes.map(
           selectedNode => Header.Raw(CIString("Replica-Node"),selectedNode.nodeId),
         )
-      _ <-ctx.logger.debug("OPERATION_ID_HEADER "+operationIdsH.toString)
+//      _ <-ctx.logger.debug("OPERATION_ID_HEADER "+operationIdsH.toString)
       activeRequest   = Request[IO](
         method  = Method.POST,
         uri     = Uri.unsafeFromString(s"http://${replicaNode.nodeId}:6666/api/v2/replicate/active/$objectId"),
@@ -106,6 +106,7 @@ object Daemon {
             objectSize            = x.objectSize
             availableResourcesMap = nodexs.map(x=>x.nodeId->x).toMap
             fxReplicas            = distributionSchema.get(objectId).getOrElse(List.empty[String])
+            _ <- ctx.logger.debug(s"REPLICAS_FX $fxReplicas")
             ps                    <- if(fxReplicas.isEmpty) IO.pure(Nil)
             else {
               for {
@@ -160,7 +161,7 @@ object Daemon {
                                   ctx.logger.error(e.getMessage)
                                 }
                               newPendings = activeRes match {
-                                case Some(_) => (objectId -> pendingReplication)::Nil
+                                case Some(_) => (objectId -> pendingReplication.copy(rf =  rf - selectedNodes.length  ))::Nil
                                 case None => List.empty[(String,PendingReplication)]
                               }
                             } yield newPendings
@@ -187,14 +188,12 @@ object Daemon {
           } yield ps
         }.map(_.flatten)
 //
-        pendingReplicasIds = ps.map(_._1)
         _                  <- ctx.state.update { s =>
           s.copy(
-            pendingReplicas = pendingReplicasIds.foldRight(s.pendingReplicas){ (pendingReplicaId,m) =>
-              m.removed(pendingReplicaId)
-            }
+            pendingReplicas = s.pendingReplicas ++ ps
           )
         }
+//
       } yield()
     }.onError{ e=>
       ctx.logger.error(e.getMessage).pureS
@@ -244,7 +243,30 @@ object Daemon {
       ctx.logger.error(e.getMessage).pureS
     }
 
-    replicationDaemon concurrently checkNodesDaemon
+
+    val systemReplication = Stream.awakeEvery[IO](period = 5 seconds).evalMap{ _ =>
+      for {
+        currentState   <- ctx.state.get
+        pendingSysReps = currentState.pendingSystemReplicas
+        rawEvents      = currentState.events
+        events         = Events.orderAndFilterEventsMonotonicV2(rawEvents)
+        currentAR      = EventXOps.onlyAddedNode(events = events).length
+        maybePSR       = pendingSysReps.maxByOption(_.rf)
+        _              <- maybePSR match {
+          case Some(value) =>
+            val diff = value.rf - currentAR
+           val x =  if(diff > 0 ) (0 until diff).toList.traverse{_ =>
+              ctx.config.systemReplication.createNode().flatMap(x=> ctx.logger.debug(s"CREATED_NODE ${x.nodeId}"))
+            }
+            else IO.unit
+            ctx.logger.debug(s"DIFF_RF $diff") *> ctx.logger.debug(s"CURRENT_AR $currentAR") *> x
+          case None => IO.unit
+        }
+        _ <- ctx.state.update{s=> s.copy(pendingSystemReplicas = Nil)}
+      } yield ()
+    }
+
+    replicationDaemon concurrently checkNodesDaemon concurrently systemReplication
   }
 
 }

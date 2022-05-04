@@ -27,7 +27,7 @@ object CompletedUploadController {
         _            <- ctx.logger.debug(s"OBJECT_ID $objectId")
         _            <- ctx.logger.debug(s"BLOCK_INDEX $blockIndex")
         _            <- ctx.logger.debug(s"NODE_ID $nodeId")
-        _            <- ctx.logger.debug(puts.toString)
+//        _            <- ctx.logger.debug(puts.toString)
         operationBlockId      = s"${operationId}_$blockIndex"
         maybePut     = puts.find(p => p.correlationId == operationBlockId && p.objectId == objectId && p.nodeId == nodeId)
         _<-ctx.logger.debug("MAYBE_PUT "+maybePut.toString)

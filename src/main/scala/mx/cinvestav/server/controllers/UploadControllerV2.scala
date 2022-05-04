@@ -4,6 +4,7 @@ import cats.implicits._
 import cats.data.NonEmptyList
 import cats.effect.IO
 import cats.effect.std.Semaphore
+import mx.cinvestav.Declarations.PendingSystemReplica
 import mx.cinvestav.commons.types.PendingReplication
 import org.http4s.Response
 //import mx.cinvestav.Declarations.BalanceResponse
@@ -163,20 +164,31 @@ object UploadControllerV2 {
             case 0 => program
             case x =>
               for {
-                _                  <- ctx.logger.debug(s"Replicate $x nodes")
-                xs                 <- ctx.config.systemReplication.launchNode().replicateA(x).start
-//                replicationMethod  = ""
-                pendingReplication = PendingReplication(objectId = objectId, objectSize = objectSize,rf = x,replicationTechique)
-                _                  <- ctx.state.update(s=>s.copy(pendingReplicas =  s.pendingReplicas + (objectId -> pendingReplication) ))
-                res               <- program
+                _ <- IO.unit
+                pendingSystemReplicas = PendingSystemReplica( rf = rf,ar=nodes.length,mandatory = false)
+                pendingReplication    = PendingReplication(objectId = objectId, objectSize = objectSize,rf = x,replicationTechique)
+                _                     <- ctx.state.update{ s=>
+                  s.copy(
+                    pendingReplicas       =  s.pendingReplicas + (objectId -> pendingReplication),
+                    pendingSystemReplicas = s.pendingSystemReplicas:+ pendingSystemReplicas
+                  )
+                }
+                res                 <- program
               } yield res
           })
 
         case None =>
           for {
-            maybeSystemRepREs <- ctx.config.systemReplication.launchNode().start
+//            maybeSystemRepREs <- ctx.config.systemReplication.launchNode().start
             res               <- Accepted()
-//            res <- maybeSystemRepREs match {
+            _ <- IO.unit
+            pendingSystemReplicas = PendingSystemReplica( rf = rf,ar=0,mandatory = false)
+            _                     <- ctx.state.update{ s=>
+              s.copy(
+                pendingSystemReplicas = s.pendingSystemReplicas:+ pendingSystemReplicas
+              )
+            }
+            //            res <- maybeSystemRepREs match {
 //              case Some(value) =>
 //                val nodeId = value.nodeId
 //                ctx.logger.debug(s"NEW_NODE_ADDED $nodeId")
