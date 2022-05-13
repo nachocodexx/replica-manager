@@ -95,20 +95,24 @@ object UploadControllerV2 {
     userId:String,
     events:List[EventX],
     nodes:NonEmptyList[NodeX],
+    pivotReplicaNode:NodeX,
+    //    nodexs:NonEmptyList[NodeX],
     blockIndex:Int =0,
     rf:Int = 1,
-    replicationTechique:String = "ACTIVE"
+    _replicationTechique:String = "ACTIVE",
+    replicaNodes:List[NodeX] = Nil,
+    collaborative:Boolean = false,
   )(implicit ctx:NodeContext) = {
     for {
       _                  <- IO.unit
-      maybeSelectedNode  = balance(events= events)(objectSize = objectSize,nodes = nodes,rf = rf)
+      maybeSelectedNode  = if(collaborative && replicaNodes.nonEmpty)  replicaNodes.some else balance(events= events)(objectSize = objectSize,nodes = nodes,rf = rf)
       response          <- maybeSelectedNode match {
         case Some(nodes)  =>
           val nNodes  = nodes.length
           val diffRF  = rf - nNodes
 
           val program = for {
-              _        <- ctx.logger.debug(s"SELECTED_NODES $nodes")
+              _        <- ctx.logger.debug(s"SELECTED_NODES ${nodes.map(_.nodeId)}")
               xs       <- nodes.zipWithIndex.traverse{
                 case (node,index) =>
                   for {
@@ -166,7 +170,13 @@ object UploadControllerV2 {
               for {
                 _ <- IO.unit
                 pendingSystemReplicas = PendingSystemReplica( rf = rf,ar=nodes.length,mandatory = false)
-                pendingReplication    = PendingReplication(objectId = objectId, objectSize = objectSize,rf = x,replicationTechique)
+                pendingReplication    = PendingReplication(
+                  objectId             = objectId,
+                  objectSize           = objectSize,
+                  rf                   = x,
+                  replicaNodes         = replicaNodes.map(_.nodeId),
+                  replicationTechnique = _replicationTechique
+                )
                 _                     <- ctx.state.update{ s=>
                   s.copy(
                     pendingReplicas       =  s.pendingReplicas + (objectId -> pendingReplication),
@@ -203,7 +213,10 @@ object UploadControllerV2 {
   def controller(
                   operationId:String,
                   objectId:String,
-                  blockIndex:Int = 0
+                  pivotReplicaNode:NodeX,
+                  blockIndex:Int = 0,
+                  definedReplicaNodes:List[NodeX]=Nil,
+                  collaborative:Boolean = false,
                 )(
     authReq:AuthedRequest[IO,User],
     user:User,
@@ -217,8 +230,8 @@ object UploadControllerV2 {
       objectSize           = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(0L)
       replicationTechnique = headers.get(CIString("Replication-Technique")).map(_.head.value).getOrElse(currentState.replicationTechnique)
 
-      maybeObject        = Events.getObjectByIdV3(objectId = objectId,operationId =operationId ,events=events)
-      arMap              = ctx.config.uploadLoadBalancer match {
+      maybeObject          = Events.getObjectByIdV3(objectId = objectId,operationId =operationId ,events=events)
+      arMap                = ctx.config.uploadLoadBalancer match {
         case "SORTING_UF" | "TWO_CHOICES" => EventXOps.getAllNodeXs(
           events     = rawEvents.sortBy(_.monotonicTimestamp),
           objectSize = objectSize
@@ -229,10 +242,9 @@ object UploadControllerV2 {
         ).map(x=>x.nodeId->x).toMap
       }
       //       NO EMPTY LIST OF RD's
-      maybeARNodeX       = NonEmptyList.fromList(arMap.values.toList)
-//      _ <- ctx.logger.debug(s"AR $")
-      nN                 = arMap.size
-      impactFactor       = authReq.req.headers.get(CIString("Impact-Factor"))
+      maybeARNodeX         = NonEmptyList.fromList(arMap.values.toList)
+      nN                   = arMap.size
+      impactFactor         = authReq.req.headers.get(CIString("Impact-Factor"))
         .flatMap(_.head.value.toDoubleOption)
         .map(x=> if(x==0.0) ctx.config.defaultImpactFactor else x)
         .getOrElse(1/nN.toDouble)
@@ -253,15 +265,21 @@ object UploadControllerV2 {
 
                 res <- Accepted()
               } yield res
-          } else commonCode(operationId)(
-            objectId   = objectId,
-            objectSize = objectSize,
-            userId     = user.id,
-            events     = events,
-            nodes      = NonEmptyList.fromListUnsafe(filteredNodes),
-            rf         =if(impactFactor == 0.0 ) rf  else math.ceil(impactFactor*nN).toInt,
-            blockIndex = blockIndex,
-            replicationTechique = replicationTechnique
+          }
+
+          else commonCode(operationId)(
+            objectId            = objectId,
+            objectSize          = objectSize,
+            userId              = user.id,
+            events              = events,
+            nodes               = NonEmptyList.fromListUnsafe(filteredNodes),
+            rf                  = if(collaborative) definedReplicaNodes.length else if(impactFactor == 0.0 ) rf  else math.ceil(impactFactor*nN).toInt,
+
+            blockIndex          = blockIndex,
+            _replicationTechique = replicationTechnique,
+            replicaNodes        = definedReplicaNodes,
+            collaborative       = collaborative,
+            pivotReplicaNode    = pivotReplicaNode
           )
         } yield res
 
@@ -293,6 +311,7 @@ object UploadControllerV2 {
           currentState       <- ctx.state.get
           rawEvents          = currentState.events
           events             = Events.orderAndFilterEventsMonotonicV2(rawEvents)
+          nodexs             = EventXOps.getAllNodeXs(events = events).map(x=>x.nodeId-> x).toMap
 //      ______________________________________________________________________________________
           headers              = authReq.req.headers
           operationId          = headers.get(CIString("Operation-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
@@ -305,26 +324,52 @@ object UploadControllerV2 {
           arrivalTime          = headers.get(CIString("Arrival-Time")).map(_.head.value).flatMap(_.toLongOption).getOrElse(serviceTimeStart)
           catalogId            = headers.get(CIString("Catalog-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
           digest               = headers.get(CIString("Digest")).map(_.head.value).getOrElse("")
+          collaborative        = headers.get(CIString("Collaborative")).flatMap(_.head.value.toBooleanOption).getOrElse(false)
+          pivotReplicaNode     = headers.get(CIString("Pivot-Replica-Node")).map(_.head.value).getOrElse("")
+          replicaNodes         = headers.get(CIString("Replica-Node")).map(_.map(_.value).toList).getOrElse(Nil)
+          replicationTechnique = headers.get(CIString("Replication-Technique")).map(_.head.value).getOrElse(ctx.config.replicationTechnique)
           blockIndex           = headers.get(CIString("Block-Index")).map(_.head.value).flatMap(_.toIntOption).getOrElse(0)
           blockId              = s"${objectId}_${blockIndex}"
           latency              = serviceTimeStart - requestStartAt
             //      ______________________________________________________________________________________________________________
+          _ <- ctx.logger.debug(s"COLLABORATIVE $collaborative")
+          _ <- ctx.logger.debug(s"REPLICA_NODES $replicaNodes")
           _                    <- ctx.logger.debug(s"LATENCY $objectId $latency")
           _                    <- ctx.logger.debug(s"ARRIVAL_TIME $objectId $serviceTimeStart")
 //      ______________________________________________________________________________________________________________
           _                    <- ctx.logger.debug(s"SERVICE_TIME_START $objectId $serviceTimeStart")
 //        ___________________________________________________________________________________
+          _ <- if(collaborative) {
+            val pr = PendingReplication(
+              objectId             = objectId,
+              objectSize           = objectSize,
+              rf                   = replicaNodes.length,
+              replicationTechnique = replicationTechnique,
+              replicaNodes         = replicaNodes
+//                replicaNodes.toSet.diff(Set(pivotReplicaNode)).toList
+            )
+            ctx.state.update{
+              s=>{
+                val pendingReplicas    = s.pendingReplicas + (pr.objectId -> pr)
+                s.copy(pendingReplicas = pendingReplicas  )
+              }
+            }
+          } else IO.unit
+          pivotReplicaNodex = nodexs.get(pivotReplicaNode).get
           response             <- controller(
-            operationId = operationId,
-            objectId    = objectId,
-            blockIndex  = blockIndex
+            operationId         = operationId,
+            objectId            = objectId,
+            blockIndex          = blockIndex,
+            definedReplicaNodes = replicaNodes.map(x=>nodexs.get(x) ).sequence.getOrElse(Nil),
+            collaborative       =  collaborative,
+            pivotReplicaNode    = pivotReplicaNodex
           )(authReq=authReq,user=user, rawEvents=rawEvents, events=events)
 //        _____________________________________________________________
           serviceTimeEnd     <- monotonic
           serviceTime        = serviceTimeEnd - serviceTimeStart
 //       _______________________________________________________________________________
           headers            = response.headers
-          selectedNodeIds    = headers.get(CIString("Node-Id")).map(x=>x.toList.map(_.value)).getOrElse(List.empty[String])
+          selectedNodeIds    = if(collaborative) pivotReplicaNode::Nil else headers.get(CIString("Node-Id")).map(x=>x.toList.map(_.value)).getOrElse(List.empty[String]) :+ pivotReplicaNode
           _                  <- ctx.logger.debug(s"SERVICE_TIME_END $objectId $serviceTimeEnd")
           _                  <- ctx.logger.debug(s"SERVICE_TIME $objectId $serviceTime")
 //      ______________________________________________________________________________________
@@ -349,7 +394,8 @@ object UploadControllerV2 {
               digest               = digest,
               compressionAlgorithm = compressionAlgorithm,
               extension            = fileExtension,
-              arrivalTime          = arrivalTime
+              arrivalTime          = arrivalTime,
+              operationId          = operationId
             )
           }
 //          _ <- ctx.logger.debug(_events.toString)

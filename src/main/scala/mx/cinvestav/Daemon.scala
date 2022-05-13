@@ -25,9 +25,68 @@ import mx.cinvestav.commons.Implicits._
 
 import scala.concurrent.duration._
 import scala.language.postfixOps
+import retry._
+import retry.implicits._
 
 object Daemon {
 
+
+  def passive(
+               objectId:String,
+               x:PendingReplication,
+               events:List[EventX],
+               selectedNodes:List[NodeX],
+               replicaNode:NodeX,
+               serviceTimeStart:Long = 0L,
+               serviceTimeEnd:Long   = 0L,
+               arrivalTime:Long      = 0L
+             )(implicit ctx:NodeContext) = {
+    for {
+      _               <- ctx.logger.debug(s"PASSIVE_REPLICATION ${x.rf} ${replicaNode.nodeId}")
+      puts            = EventXOps.onlyPuts(events=events).asInstanceOf[List[Put]]
+      maybeDefaultPut = puts.find(_.objectId == objectId)
+      newPuts         = maybeDefaultPut match {
+        case Some(defaultPut) =>
+          selectedNodes.map{ node =>
+            val (operationId,correlationId) = {
+              val uuid = UUID.randomUUID().toString.substring(0, 5)
+              (s"op-${uuid}",s"op-${uuid}_${defaultPut.getBlockIndex()}")
+            }
+            defaultPut.copy(
+              nodeId           = node.nodeId,
+              serviceTimeStart = serviceTimeStart,
+              serviceTimeEnd   = serviceTimeEnd,
+              serviceTimeNanos = serviceTimeEnd - serviceTimeStart,
+              correlationId    = correlationId,
+              arrivalTime      = arrivalTime,
+              timestamp        = arrivalTime,
+              operationId      = operationId
+            )
+          }
+        case None => Nil
+      }
+      //    _________________________________________________________________________________________
+      _               <- Events.saveEvents(events = newPuts)
+      operationIdsH   = newPuts.map{ x =>Header.Raw(CIString("Operation-Id"),x.operationId)}
+      replicaNodeH    = selectedNodes.map(
+        selectedNode => Header.Raw(CIString("Replica-Node"),selectedNode.nodeId),
+      )
+
+      passiveRequest   = Request[IO](
+        method  = Method.POST,
+        uri     = Uri.unsafeFromString(s"http://${replicaNode.nodeId}:6666/api/v2/replicate/passive/$objectId"),
+        headers = Headers(operationIdsH).put(replicaNodeH)
+      )
+      activeResponse  <- ctx.client.status(passiveRequest).retryingOnFailures(
+        policy = RetryPolicies.limitRetries[IO](10) join RetryPolicies.exponentialBackoff[IO](1 second),
+        wasSuccessful = s=> s.isSuccess.pure[IO],
+        onFailure = (s,rd) => ctx.logger.debug(s"ON_FAILURE $objectId ${x.rf}")
+      )
+      res             = Option.when(activeResponse.isSuccess)(())
+//      res            <- IO.pure(().some)
+    } yield res
+
+  }
 
   def active(
               objectId:String,
@@ -63,21 +122,21 @@ object Daemon {
           }
         case None => Nil
       }
-//      _               <- ctx.logger.debug(s"REPLICA_PUTS $newPuts")
       _               <- Events.saveEvents(events = newPuts)
       operationIdsH   = newPuts.map{ x =>Header.Raw(CIString("Operation-Id"),x.operationId)}
       replicaNodeH    = selectedNodes.map(
           selectedNode => Header.Raw(CIString("Replica-Node"),selectedNode.nodeId),
         )
-//      _ <-ctx.logger.debug("OPERATION_ID_HEADER "+operationIdsH.toString)
       activeRequest   = Request[IO](
         method  = Method.POST,
         uri     = Uri.unsafeFromString(s"http://${replicaNode.nodeId}:6666/api/v2/replicate/active/$objectId"),
         headers = Headers(operationIdsH).put(replicaNodeH)
       )
-      activeResponse  <- ctx.client.status(activeRequest).onError{ e=>
-        ctx.logger.error(e.getMessage)
-      }
+      activeResponse  <- ctx.client.status(activeRequest).retryingOnFailures(
+        policy = RetryPolicies.limitRetries[IO](10) join RetryPolicies.exponentialBackoff[IO](1 second),
+        wasSuccessful = s=> s.isSuccess.pure[IO],
+        onFailure = (s,rd) => ctx.logger.debug(s"ON_FAILURE $objectId ${x.rf}")
+      )
       res             = Option.when(activeResponse.isSuccess)(())
       _               <- ctx.logger.debug(activeResponse.toString+ s" <> $res")
     } yield res
@@ -96,96 +155,99 @@ object Daemon {
         completedPuts      = EventXOps.onlyPutCompleteds(events = events).asInstanceOf[List[PutCompleted]]
         completedPutsIds   = completedPuts.map(_.objectId)
         //                 _________________________________________________________________________________________________
-        _ <- ctx.logger.debug(s"PENDING_REPLICAS $pendingReplicas")
-//        _ <- ctx.logger.debug("COMPLETED_PUTS")
-        ps                 <- pendingReplicas.toList.filter(x=>x._2.rf>0 && completedPutsIds.contains(x._1)).traverse{
-          case (objectId,x) => for {
-            _                     <- IO.unit
-            objectId              = x.objectId
-            rf                    = x.rf
-            objectSize            = x.objectSize
-            availableResourcesMap = nodexs.map(x=>x.nodeId->x).toMap
-            fxReplicas            = distributionSchema.get(objectId).getOrElse(List.empty[String])
-            _ <- ctx.logger.debug(s"REPLICAS_FX $fxReplicas")
-            ps                    <- if(fxReplicas.isEmpty) IO.pure(Nil)
-            else {
-              for {
-                _                 <- IO.unit
-                fxReplicaNodes    = nodexs.filter(x=>fxReplicas.contains(x.nodeId))
-                //          _________________________________________________________________________________________________
-                availableNodexs   = nodexs.filterNot(x=>fxReplicas.contains(x.nodeId))
-                //          _________________________________________________________________________________________________
-                newRf             = {
-                  val x0 = rf - availableNodexs.length
-                  if(x0<0) 0 else x0
-                }
-                pendingReplication = PendingReplication(
-                  rf = newRf,
-                  objectId = objectId,
-                  objectSize = objectSize
-                )
-                //          _________________________________________________________________________________________________
-                maybeAvailableNodexsNe  = NonEmptyList.fromList(availableNodexs)
+//        _ <- ctx.logger.debug(s"PENDING_REPLICAS $pendingReplicas")
+        filteredPendingReplication = pendingReplicas.toList.filter(x=>x._2.rf>0 && completedPutsIds.contains(x._1))
+        ps                         <- filteredPendingReplication.traverse{
+          case (objectId,x) =>
+            for {
+              _           <- IO.unit
+              objectId    = x.objectId
+              rf          = x.rf
+              objectSize  = x.objectSize
+              fxReplicas  = distributionSchema.get(objectId).getOrElse(List.empty[String])
+              _           <- ctx.logger.debug(s"REPLICAS_FX $fxReplicas")
+              _           <- ctx.logger.debug(s"REPLICA_NODES ${x.replicaNodes}")
+              _           <- ctx.logger.debug(s"AVAILABLE_NODEX ${nodexs.map(_.nodeId)}")
+              ps          <- if(fxReplicas.isEmpty) IO.pure(Nil)
+              else {
+                     for {
+                     _                 <- IO.unit
+                     fxReplicaNodes    = nodexs.filter(x=>fxReplicas.contains(x.nodeId))
+                     //          _________________________________________________________________________________________________
+                     availableNodexs   = nodexs.filterNot(x=>fxReplicas.contains(x.nodeId))
+                     //          _________________________________________________________________________________________________
+                     newRf             = {
+                     val x0 = rf - availableNodexs.length
+                     if(x0<0) 0 else x0
+                     }
+                     pendingReplication = PendingReplication(
+                     rf = newRf,
+                     objectId = objectId,
+                     objectSize = objectSize
+                     )
+                     //          _________________________________________________________________________________________________
+                     maybeAvailableNodexsNe  = NonEmptyList.fromList(availableNodexs)
 
-                xxxx <- maybeAvailableNodexsNe match {
-                  case Some(availableNodeXNEL) => for {
-                    _                   <- IO.unit
-                    serviceTimeStart    <- IO.monotonic.map(_.toNanos)
-                    arrivalTime         <- IO.realTime.map(_.toNanos)
-                    maybeSelectedNodes  = UploadControllerV2.balance(
-                      events = events
-                    )(
-                      objectSize = objectSize,
-                      nodes = availableNodeXNEL,
-                      rf = x.rf
-                    )
-                    serviceTimeEnd      <- IO.monotonic.map(_.toNanos)
-                    xxx                 <- maybeSelectedNodes match {
-                      case Some(selectedNodes) => for {
-                        _           <- ctx.logger.debug(s"SELECTED_NODES ${selectedNodes.length}")
-                        replicaNode = fxReplicaNodes.head
+                     xxxx <- maybeAvailableNodexsNe match {
+                     case Some(availableNodeXNEL) => for {
+                     _                   <- IO.unit
+                     serviceTimeStart    <- IO.monotonic.map(_.toNanos)
+                     arrivalTime         <- IO.realTime.map(_.toNanos)
+                     maybeSelectedNodes  =if(x.replicaNodes.nonEmpty)
+                       x.replicaNodes.map(n=>nodexs.find(_.nodeId == n )).sequence
+                     else
+                       UploadControllerV2.balance(events = events)(
+                     objectSize = objectSize,
+                     nodes = availableNodeXNEL,
+                     rf = x.rf
+                     )
+                     serviceTimeEnd      <- IO.monotonic.map(_.toNanos)
+                     xxx                 <- maybeSelectedNodes match {
+                     case Some(selectedNodes) => for {
+                     _           <- ctx.logger.debug(s"SELECTED_NODES ${selectedNodes.length}")
+                     replicaNode = fxReplicaNodes.head
 
-                        xx  <- x.replicationTechnique match {
-                          case "ACTIVE"                =>
-                            for {
-                              activeRes <- active(
-                                  objectId         = objectId,
-                                  x                = x,
-                                  events           = events,
-                                  selectedNodes    = selectedNodes,
-                                  replicaNode      = replicaNode,
-                                  serviceTimeStart = serviceTimeStart,
-                                  serviceTimeEnd   = serviceTimeEnd,
-                                  arrivalTime      = arrivalTime
-                                ).onError{ e =>
-                                  ctx.logger.error(e.getMessage)
-                                }
-                              newPendings = activeRes match {
-                                case Some(_) => (objectId -> pendingReplication.copy(rf =  rf - selectedNodes.length  ))::Nil
-                                case None => List.empty[(String,PendingReplication)]
-                              }
-                            } yield newPendings
-                          case "PASSIVE"               => for {
-                            _            <- ctx.logger.debug(s"PASSIVE_REPLICATION ${x.rf} ${replicaNode.nodeId}")
-                            newPendings = Nil
-                          } yield newPendings
-                          case "COLLABORATIVE_PASSIVE" => for {
-                            _ <- ctx.logger.debug(s"COLLABORATIVE_PASSIVE_REPLICATION ${x.rf} ${replicaNode.nodeId}")
-                            newPendings = Nil
-                          } yield newPendings
-                        }
-                        _  <- ctx.logger.debug(s"CREATE_REPLICAS $objectId $rf")
-                        _  <- ctx.logger.debug("__________________________________________________")
-                      } yield xx
-                      case None => IO.pure(Nil)
-                    }
-                  } yield xxx
-                  case None => ctx.logger.debug("NO AVAILABLE NODES") *> IO.pure(Nil)
-                }
-//                x =
-              } yield xxxx
-            }
+                     xx  <- x.replicationTechnique match {
+                     case "ACTIVE"                =>
+                       for {
+                       activeRes <- active(
+                       objectId         = objectId,
+                       x                = x,
+                       events           = events,
+                       selectedNodes    = selectedNodes,
+                       replicaNode      = replicaNode,
+                       serviceTimeStart = serviceTimeStart,
+                       serviceTimeEnd   = serviceTimeEnd,
+                       arrivalTime      = arrivalTime
+                       ).onError{ e =>
+                       ctx.logger.error(e.getMessage)
+                       }
+                       newPendings = activeRes match {
+                       case Some(_) => (objectId -> pendingReplication.copy(rf =  rf - selectedNodes.length  ))::Nil
+                       case None => List.empty[(String,PendingReplication)]
+                       }
+                     } yield newPendings
+                     case "PASSIVE"               => for {
+                     _            <- ctx.logger.debug(s"PASSIVE_REPLICATION ${x.rf} ${replicaNode.nodeId}")
+                     newPendings = Nil
+                     } yield newPendings
+                     case "COLLABORATIVE_PASSIVE" => for {
+                     _ <- ctx.logger.debug(s"COLLABORATIVE_PASSIVE_REPLICATION ${x.rf} ${replicaNode.nodeId}")
+                     newPendings = Nil
+                     } yield newPendings
+                     }
+                     _  <- ctx.logger.debug(s"CREATE_REPLICAS $objectId $rf")
+                     _  <- ctx.logger.debug("__________________________________________________")
+                     } yield xx
+                     case None => IO.pure(Nil)
+                     }
+                     } yield xxx
+                     case None => ctx.logger.debug("NO AVAILABLE NODES") *> IO.pure(Nil)
+                     }
+                     } yield xxxx
+                     }
           } yield ps
+//  _____________________________--------------------_______________-
         }.map(_.flatten)
 //
         _                  <- ctx.state.update { s =>

@@ -17,6 +17,7 @@ object CompletedUploadController {
   def apply()(implicit ctx:NodeContext) = HttpRoutes.of[IO]{
     case req@POST -> Root / "upload" / operationId / objectId / IntVar(blockIndex) =>
       val program = for {
+//        _            <- IO.sleep(ctx.config.del)
         currentState <- ctx.state.get
         //      ________________________________________________________________________
         events       = Events.filterEventsMonotonicV2(events = currentState.events)
@@ -29,6 +30,7 @@ object CompletedUploadController {
         _            <- ctx.logger.debug(s"NODE_ID $nodeId")
 //        _            <- ctx.logger.debug(puts.toString)
         operationBlockId      = s"${operationId}_$blockIndex"
+        _ <- ctx.logger.debug(puts.toString)
         maybePut     = puts.find(p => p.correlationId == operationBlockId && p.objectId == objectId && p.nodeId == nodeId)
         _<-ctx.logger.debug("MAYBE_PUT "+maybePut.toString)
         //      ________________________________________________________________________
