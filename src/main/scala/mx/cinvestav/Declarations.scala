@@ -7,12 +7,14 @@ import cats.effect.{FiberIO, IO, Ref}
 import mx.cinvestav.commons.balancer.v2.Balancer
 import mx.cinvestav.commons.status.Status
 import mx.cinvestav.config.{DefaultConfig, NodeInfo}
-import mx.cinvestav.commons.types.{NodeUFs, NodeX, PendingReplication}
+import mx.cinvestav.commons.types.{NodeUFs, NodeX, PendingReplication, UploadHeaders}
 import mx.cinvestav.commons.balancer.v3.{Balancer => BalancerV3}
 import mx.cinvestav.commons.events.{AddedNode, Del, Downloaded, EventX, Evicted, Get, GetCompleted, Missed, ObjectHashing, Push, Put, PutCompleted, RemovedNode, Replicated, UpdatedNodePort, Uploaded, Pull => PullEvent, TransferredTemperature => SetDownloads}
 import mx.cinvestav.events.Events.{GetInProgress, HotObject, MeasuredServiceTime, MonitoringStats, UpdatedNetworkCfg}
+import org.http4s.Headers
 import org.http4s.blaze.client.BlazeClientBuilder
 import org.http4s.client.Client
+import org.typelevel.ci.CIString
 //
 import io.circe._
 import io.circe.generic.auto._
@@ -175,4 +177,50 @@ object Declarations {
                             client:Client[IO],
                             systemReplicationSignal:SignallingRef[IO,Boolean]
                           )
+
+  object UploadHeadersOps {
+    def fromHeaders(headers:Headers)(implicit ctx:NodeContext) = {
+      for {
+        serviceTimeStart     <- IO.monotonic.map(_.toNanos)
+        //     ________________________________________________________________
+        operationId             = headers.get(CIString("Operation-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
+        objectId                = headers.get(CIString("Object-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
+        objectSize              = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(0L)
+        fileExtension           = headers.get(CIString("File-Extension")).map(_.head.value).getOrElse("")
+        filePath                = headers.get(CIString("File-Path")).map(_.head.value).getOrElse(s"$objectId.$fileExtension")
+        compressionAlgorithm    = headers.get(CIString("Compression-Algorithm")).map(_.head.value).getOrElse("")
+        requestStartAt          = headers.get(CIString("Request-Start-At")).map(_.head.value).flatMap(_.toLongOption).getOrElse(serviceTimeStart)
+        catalogId               = headers.get(CIString("Catalog-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
+        digest                  = headers.get(CIString("Digest")).map(_.head.value).getOrElse("")
+        blockIndex              = headers.get(CIString("Block-Index")).map(_.head.value).flatMap(_.toIntOption).getOrElse(0)
+        blockTotal              = headers.get(CIString("Block-Total")).map(_.head.value).flatMap(_.toIntOption).getOrElse(0)
+        arrivalTime             = headers.get(CIString("Arrival-Time")).map(_.head.value).flatMap(_.toLongOption).getOrElse(serviceTimeStart)
+        collaborative           = headers.get(CIString("Collaborative")).map(_.head.value).flatMap(_.toBooleanOption).getOrElse(false)
+        replicationTechnique    = headers.get(CIString("Replication-Technique")).map(_.head.value).getOrElse(ctx.config.replicationTechnique)
+        replicationTransferType = headers.get(CIString("Replication-Transfer-Type")).map(_.head.value).getOrElse(ctx.config.replicationTransferType)
+        replicaNodes            = headers.get(CIString("Replica-Node")).map(_.map(_.value).toList).getOrElse(Nil)
+        _blockId                = s"${objectId}_${blockIndex}"
+        blockId                 = headers.get(CIString("Block-Id")).map(_.head.value).getOrElse(_blockId)
+        upheaders               = UploadHeaders(
+          operationId             = operationId,
+          objectId                = objectId,
+          objectSize              = objectSize,
+          fileExtension           = fileExtension,
+          filePath                = filePath,
+          compressionAlgorithm    = compressionAlgorithm,
+          requestStartAt          = requestStartAt,
+          catalogId               = catalogId,
+          digest                  = digest,
+          blockIndex              = blockIndex,
+          blockTotal              = blockTotal,
+          arrivalTime             = arrivalTime,
+          collaborative           = collaborative,
+          replicaNodes            = replicaNodes,
+          replicationTechnique    = replicationTechnique,
+          replicationTransferType = replicationTransferType,
+          blockId                 = blockId
+        )
+      } yield upheaders
+    }
+  }
 }
