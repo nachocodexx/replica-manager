@@ -5,18 +5,15 @@ import cats.data.NonEmptyList
 import cats.effect.IO
 import cats.effect.std.Semaphore
 import mx.cinvestav.Declarations.PendingSystemReplica
+import mx.cinvestav.Declarations.UploadHeadersOps
 import mx.cinvestav.commons.types.PendingReplication
 import org.http4s.Response
-//import mx.cinvestav.Declarations.BalanceResponse
-import mx.cinvestav.commons.events.{EventXOps, PutCompleted}
+import mx.cinvestav.commons.events.EventXOps
 import mx.cinvestav.commons.types.DumbObject
-//import mx.cinvestav.con
 //
 import mx.cinvestav.Declarations.{NodeContext, User}
-import mx.cinvestav.Helpers
-import mx.cinvestav.commons.balancer.v3.Balancer
 import mx.cinvestav.commons.events.Put
-import mx.cinvestav.commons.types.{NodeX,Monitoring,BalanceResponse}
+import mx.cinvestav.commons.types.{NodeX,BalanceResponse}
 import mx.cinvestav.commons.events.EventX
 import mx.cinvestav.events.Events
 import mx.cinvestav.commons.balancer.{nondeterministic,deterministic}
@@ -198,13 +195,7 @@ object UploadControllerV2 {
                 pendingSystemReplicas = s.pendingSystemReplicas:+ pendingSystemReplicas
               )
             }
-            //            res <- maybeSystemRepREs match {
-//              case Some(value) =>
-//                val nodeId = value.nodeId
-//                ctx.logger.debug(s"NEW_NODE_ADDED $nodeId")
-//                Accepted()
-//              case None => Accepted()
-//            }
+
         }  yield res
       }
     } yield response
@@ -313,39 +304,45 @@ object UploadControllerV2 {
           events             = Events.orderAndFilterEventsMonotonicV2(rawEvents)
           nodexs             = EventXOps.getAllNodeXs(events = events).map(x=>x.nodeId-> x).toMap
 //      ______________________________________________________________________________________
-          headers              = authReq.req.headers
-          operationId          = headers.get(CIString("Operation-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
-          objectId             = headers.get(CIString("Object-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
-          objectSize           = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(0L)
-          fileExtension        = headers.get(CIString("File-Extension")).map(_.head.value).getOrElse("")
-          filePath             = headers.get(CIString("File-Path")).map(_.head.value).getOrElse(s"$objectId.$fileExtension")
-          compressionAlgorithm = headers.get(CIString("Compression-Algorithm")).map(_.head.value).getOrElse("")
-          requestStartAt       = headers.get(CIString("Request-Start-At")).map(_.head.value).flatMap(_.toLongOption).getOrElse(serviceTimeStart)
-          arrivalTime          = headers.get(CIString("Arrival-Time")).map(_.head.value).flatMap(_.toLongOption).getOrElse(serviceTimeStart)
-          catalogId            = headers.get(CIString("Catalog-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
-          digest               = headers.get(CIString("Digest")).map(_.head.value).getOrElse("")
-          collaborative        = headers.get(CIString("Collaborative")).flatMap(_.head.value.toBooleanOption).getOrElse(false)
-          pivotReplicaNode     = headers.get(CIString("Pivot-Replica-Node")).map(_.head.value).getOrElse("")
-          replicaNodes         = headers.get(CIString("Replica-Node")).map(_.map(_.value).toList).getOrElse(Nil)
-          replicationTechnique = headers.get(CIString("Replication-Technique")).map(_.head.value).getOrElse(ctx.config.replicationTechnique)
-          blockIndex           = headers.get(CIString("Block-Index")).map(_.head.value).flatMap(_.toIntOption).getOrElse(0)
-          blockId              = s"${objectId}_${blockIndex}"
-          latency              = serviceTimeStart - requestStartAt
-            //      ______________________________________________________________________________________________________________
-          _ <- ctx.logger.debug(s"COLLABORATIVE $collaborative")
-          _ <- ctx.logger.debug(s"REPLICA_NODES $replicaNodes")
-          _                    <- ctx.logger.debug(s"LATENCY $objectId $latency")
-          _                    <- ctx.logger.debug(s"ARRIVAL_TIME $objectId $serviceTimeStart")
+          headers            = authReq.req.headers
 //      ______________________________________________________________________________________________________________
-          _                    <- ctx.logger.debug(s"SERVICE_TIME_START $objectId $serviceTimeStart")
+          uphs               <- UploadHeadersOps.fromHeaders(headers = headers)
+//       ______________________________________________________________________________
+          currentOperation   = currentState.currentOperation
+          enqueuedOperations = currentState.clientOperations.values.toList.flatten
+          isReplica          =  false
+
+
+          _ <- if (uphs.serialNumber > currentOperation.serialNumber) {
+            for {
+              _ <- IO.unit
+              nowOperation = enqueuedOperations.find(x=>x.serialNumber == uphs.serialNumber && x.objectId == uphs.objectId)
+              _ <- ctx.logger.debug(s"CURRENT_OPERATION $currentOperation")
+            } yield ()
+          } else {
+            for {
+              _ <- IO.unit
+            } yield ()
+          }
+          _                  <- ctx.logger.debug(s"SERVICE_TIME_START ${uphs.objectId} $serviceTimeStart")
+          _                  <- ctx.logger.debug(s"COLLABORATIVE ${uphs.collaborative}")
+          _                  <- ctx.logger.debug(s"REPLICA_NODES ${uphs.replicaNodes}")
+          _                  <- ctx.logger.debug(s"ARRIVAL_TIME ${uphs.objectId} $serviceTimeStart")
+          latency            = serviceTimeStart - uphs.requestStartAt
+          _                  <- ctx.logger.debug(s"LATENCY ${uphs.objectId} ${latency}")
+            //      ______________________________________________________________________________________________________________
+          _                  <- ctx.logger.debug(s"LATENCY ${uphs.objectId} $latency")
+          _                  <- ctx.logger.debug(s"ARRIVAL_TIME ${uphs.objectId} $serviceTimeStart")
+//      ______________________________________________________________________________________________________________
+          _                  <- ctx.logger.debug(s"SERVICE_TIME_START ${uphs.objectId} $serviceTimeStart")
 //        ___________________________________________________________________________________
-          _ <- if(collaborative) {
+          _ <- if(uphs.collaborative) {
             val pr = PendingReplication(
-              objectId             = objectId,
-              objectSize           = objectSize,
-              rf                   = replicaNodes.length,
-              replicationTechnique = replicationTechnique,
-              replicaNodes         = replicaNodes
+              objectId             = uphs.objectId,
+              objectSize           = uphs.objectSize,
+              rf                   = uphs.replicaNodes.length,
+              replicationTechnique = uphs.replicationTechnique,
+              replicaNodes         = uphs.replicaNodes
 //                replicaNodes.toSet.diff(Set(pivotReplicaNode)).toList
             )
             ctx.state.update{
@@ -355,13 +352,13 @@ object UploadControllerV2 {
               }
             }
           } else IO.unit
-          pivotReplicaNodex = nodexs.get(pivotReplicaNode).get
+          pivotReplicaNodex = nodexs.get(uphs.pivotReplicaNode).get
           response             <- controller(
-            operationId         = operationId,
-            objectId            = objectId,
-            blockIndex          = blockIndex,
-            definedReplicaNodes = replicaNodes.map(x=>nodexs.get(x) ).sequence.getOrElse(Nil),
-            collaborative       =  collaborative,
+            operationId         = uphs.operationId,
+            objectId            = uphs.objectId,
+            blockIndex          = uphs.blockIndex,
+            definedReplicaNodes = uphs.replicaNodes.map(x=>nodexs.get(x) ).sequence.getOrElse(Nil),
+            collaborative       = uphs.collaborative,
             pivotReplicaNode    = pivotReplicaNodex
           )(authReq=authReq,user=user, rawEvents=rawEvents, events=events)
 //        _____________________________________________________________
@@ -369,36 +366,21 @@ object UploadControllerV2 {
           serviceTime        = serviceTimeEnd - serviceTimeStart
 //       _______________________________________________________________________________
           headers            = response.headers
-          selectedNodeIds    = if(collaborative) pivotReplicaNode::Nil else headers.get(CIString("Node-Id")).map(x=>x.toList.map(_.value)).getOrElse(List.empty[String]) :+ pivotReplicaNode
-          _                  <- ctx.logger.debug(s"SERVICE_TIME_END $objectId $serviceTimeEnd")
-          _                  <- ctx.logger.debug(s"SERVICE_TIME $objectId $serviceTime")
+          selectedNodeIds    = headers.get(CIString("Node-Id")).map(x=>x.toList.map(_.value)).getOrElse(List.empty[String])
+          _                  <- ctx.logger.debug(s"SERVICE_TIME_END ${uphs.objectId} $serviceTimeEnd")
+          _                  <- ctx.logger.debug(s"SERVICE_TIME ${uphs.objectId} $serviceTime")
 //      ______________________________________________________________________________________
           _events            = selectedNodeIds.zipWithIndex.map{
             case (selectedNodeId,index) =>
-            Put(
-              replication          = false,
-              serialNumber         = 0,
-              objectId             = objectId,
-              objectSize           = objectSize,
-              timestamp            = now,
-              nodeId               = selectedNodeId,
-              serviceTimeNanos     = serviceTime,
-              userId               = user.id,
-              serviceTimeEnd       = serviceTimeEnd,
-              serviceTimeStart     = serviceTimeStart,
-              correlationId        = s"${operationId}_$blockIndex",
-              monotonicTimestamp   = 0L,
-              blockId              = blockId,
-              catalogId            = catalogId,
-              realPath             = filePath,
-              digest               = digest,
-              compressionAlgorithm = compressionAlgorithm,
-              extension            = fileExtension,
-              arrivalTime          = arrivalTime,
-              operationId          = operationId
-            )
+              Put.fromUploadHeaders(
+                nodeId = selectedNodeId,
+                userId = user.id,
+                timestamp = now,
+                serviceTimeStart,
+                serviceTimeEnd,
+                uphs
+              )
           }
-//          _ <- ctx.logger.debug(_events.toString)
           _                  <- Events.saveEvents(_events)
 //      ______________________________________________________________________________________
           newResponse        = response.putHeaders(

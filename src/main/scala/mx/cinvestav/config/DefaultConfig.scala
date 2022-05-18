@@ -118,11 +118,11 @@ case class DefaultConfig(
                           bufferSize:Int,
                           responseHeaderTimeoutMs:Long,
                           nSemaphore:Int = 1,
-                          replicationTechnique:String,
-                          systemReplicationEnabled:Boolean,
                           defaultImpactFactor:Double = 0.0,
                           availableResources:Int,
                           replicationFactor:Int,
-                          elasticity:Boolean
-                          //                          rabbitmq: RabbitMQClusterConfig
+                          elasticity:Boolean,
+                          systemReplicationEnabled:Boolean,
+                          replicationTechnique:String,
+                          replicationTransferType:String
                         )
