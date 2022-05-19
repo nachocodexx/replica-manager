@@ -1,14 +1,11 @@
 package mx.cinvestav
-
-import cats.{Id, Order}
+import cats.Order
 import cats.data.NonEmptyList
 import cats.effect.std.Semaphore
 import cats.effect.{FiberIO, IO, Ref}
-import mx.cinvestav.commons.balancer.v2.Balancer
 import mx.cinvestav.commons.status.Status
 import mx.cinvestav.config.{DefaultConfig, NodeInfo}
-import mx.cinvestav.commons.types.{NodeUFs, NodeX, PendingReplication, UploadHeaders}
-import mx.cinvestav.commons.balancer.v3.{Balancer => BalancerV3}
+import mx.cinvestav.commons.types.{NodeX, PendingReplication, UploadHeaders}
 import mx.cinvestav.commons.events.{AddedNode, Del, Downloaded, EventX, Evicted, Get, GetCompleted, Missed, ObjectHashing, Push, Put, PutCompleted, RemovedNode, Replicated, UpdatedNodePort, Uploaded, Pull => PullEvent, TransferredTemperature => SetDownloads}
 import mx.cinvestav.events.Events.{GetInProgress, HotObject, MeasuredServiceTime, MonitoringStats, UpdatedNetworkCfg}
 import org.http4s.Headers
@@ -121,6 +118,8 @@ object Declarations {
                                )
 
 
+  case class QueueOperation(arrivalTime:Long,serialNumber:Int,objectId:String,clientId:String="")
+//  case class PendingOperation()
   case class NodeState(
                         status:Status,
                         ip:String,
@@ -132,7 +131,11 @@ object Declarations {
                         misses:Map[String,Int] = Map.empty[String,Int],
                         replicationFactor:Int = 0,
                         availableResources:Int = 5,
-                        replicationTechnique:String = "ACTIVE"
+                        replicationTechnique:String = "ACTIVE",
+                        currentOperation:QueueOperation = QueueOperation(0,0,""),
+                        clientOperations:Map[String,List[QueueOperation] ] = Map.empty[String,List[QueueOperation]],
+                        lastOperation:Int = 0,
+                        pendingOperations:Map[String,QueueOperation]
                         )
   case class NodeContext(
                             config: DefaultConfig,
@@ -149,6 +152,7 @@ object Declarations {
         serviceTimeStart     <- IO.monotonic.map(_.toNanos)
         //     ________________________________________________________________
         operationId             = headers.get(CIString("Operation-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
+        clientId                = headers.get(CIString("Client-Id")).map(_.head.value).getOrElse("CLIENT_ID")
         objectId                = headers.get(CIString("Object-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
         objectSize              = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(0L)
         fileExtension           = headers.get(CIString("File-Extension")).map(_.head.value).getOrElse("")
@@ -156,7 +160,7 @@ object Declarations {
         compressionAlgorithm    = headers.get(CIString("Compression-Algorithm")).map(_.head.value).getOrElse("")
         requestStartAt          = headers.get(CIString("Request-Start-At")).map(_.head.value).flatMap(_.toLongOption).getOrElse(serviceTimeStart)
         catalogId               = headers.get(CIString("Catalog-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
-        digest                  = headers.get(CIString("Digest")).map(_.head.value).getOrElse("")
+        digest                  = headers.get(CIString("Digest")).map(_.head.value).getOrElse("DIGEST")
         blockIndex              = headers.get(CIString("Block-Index")).map(_.head.value).flatMap(_.toIntOption).getOrElse(0)
         blockTotal              = headers.get(CIString("Block-Total")).map(_.head.value).flatMap(_.toIntOption).getOrElse(0)
         arrivalTime             = headers.get(CIString("Arrival-Time")).map(_.head.value).flatMap(_.toLongOption).getOrElse(serviceTimeStart)
@@ -164,8 +168,10 @@ object Declarations {
         replicationTechnique    = headers.get(CIString("Replication-Technique")).map(_.head.value).getOrElse(ctx.config.replicationTechnique)
         replicationTransferType = headers.get(CIString("Replication-Transfer-Type")).map(_.head.value).getOrElse(ctx.config.replicationTransferType)
         replicaNodes            = headers.get(CIString("Replica-Node")).map(_.map(_.value).toList).getOrElse(Nil)
+        pivotReplicaNode        = headers.get(CIString("Pivot-Replica-Node")).map(_.head.value).getOrElse("PIVOT_REPLICA_NODE")
         _blockId                = s"${objectId}_${blockIndex}"
         blockId                 = headers.get(CIString("Block-Id")).map(_.head.value).getOrElse(_blockId)
+//      __________________________________________________________________________________________________________________
         upheaders               = UploadHeaders(
           operationId             = operationId,
           objectId                = objectId,
@@ -184,7 +190,8 @@ object Declarations {
           replicationTechnique    = replicationTechnique,
           replicationTransferType = replicationTransferType,
           blockId                 = blockId,
-//          clientId = ???, serialNumber = ???, pivotReplicaNode = ???, correlationId = ???
+          clientId                = clientId,
+          pivotReplicaNode        = pivotReplicaNode
         )
       } yield upheaders
     }

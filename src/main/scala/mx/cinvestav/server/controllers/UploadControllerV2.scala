@@ -10,11 +10,8 @@ import mx.cinvestav.commons.types.PendingReplication
 import org.http4s.Response
 import mx.cinvestav.commons.events.EventXOps
 import mx.cinvestav.commons.types.DumbObject
-//import mx.cinvestav.con
 //
 import mx.cinvestav.Declarations.{NodeContext, User}
-import mx.cinvestav.Helpers
-import mx.cinvestav.commons.balancer.v3.Balancer
 import mx.cinvestav.commons.events.Put
 import mx.cinvestav.commons.types.{NodeX,BalanceResponse}
 import mx.cinvestav.commons.events.EventX
@@ -198,13 +195,7 @@ object UploadControllerV2 {
                 pendingSystemReplicas = s.pendingSystemReplicas:+ pendingSystemReplicas
               )
             }
-            //            res <- maybeSystemRepREs match {
-//              case Some(value) =>
-//                val nodeId = value.nodeId
-//                ctx.logger.debug(s"NEW_NODE_ADDED $nodeId")
-//                Accepted()
-//              case None => Accepted()
-//            }
+
         }  yield res
       }
     } yield response
@@ -311,83 +302,121 @@ object UploadControllerV2 {
           currentState       <- ctx.state.get
           rawEvents          = currentState.events
           events             = Events.orderAndFilterEventsMonotonicV2(rawEvents)
-          nodexs             = EventXOps.getAllNodeXs(events = events).map(x=>x.nodeId-> x).toMap
+          nodexsL            = EventXOps.getAllNodeXs(events = events)
+          nodexs             = nodexsL.map(x=>x.nodeId-> x).toMap
 //      ______________________________________________________________________________________
-          headers              = authReq.req.headers
-          uphs                 <- UploadHeadersOps.fromHeaders(headers =headers)
+          headers            = authReq.req.headers
+//      ______________________________________________________________________________________________________________
+          uphs               <- UploadHeadersOps.fromHeaders(headers = headers)
           latency              = serviceTimeStart - uphs.requestStartAt
-            //      ______________________________________________________________________________________________________________
-          _                  <- ctx.logger.debug(s"LATENCY ${uphs.objectId} $latency")
-          _                  <- ctx.logger.debug(s"ARRIVAL_TIME ${uphs.objectId} $serviceTimeStart")
-//      ______________________________________________________________________________________________________________
-          _                  <- ctx.logger.debug(s"SERVICE_TIME_START ${uphs.objectId} $serviceTimeStart")
-            //      ______________________________________________________________________________________________________________
-          _                  <- ctx.logger.debug(s"COLLABORATIVE ${uphs.collaborative}")
-          _                  <- ctx.logger.debug(s"REPLICA_NODES ${uphs.replicaNodes}")
-          _                  <- ctx.logger.debug(s"LATENCY ${uphs.objectId} $latency")
-          _                  <- ctx.logger.debug(s"ARRIVAL_TIME ${uphs.objectId} $serviceTimeStart")
-//      ______________________________________________________________________________________________________________
-          _                  <- ctx.logger.debug(s"SERVICE_TIME_START ${uphs.objectId} $serviceTimeStart")
+//       ______________________________________________________________________________
+          currentOperation   = currentState.currentOperation
+          enqueuedOperations = currentState.clientOperations.values.toList.flatten
+          operations         = EventXOps.completedPutsByObjectId(events =events,objectId = uphs.objectId)
+          maybeOperation     = operations.find(_.operationId == uphs.operationId)
+          maybeOperationBySerial = operations.find(_.serialNumber == uphs.serialNumber)
+          rex                <- maybeOperation match {
+            case Some(value) => for {
+              _      <- ctx.logger.debug(s"OPERATION_ALREADY_COMPLETED ${value.operationId} ${value.objectId} ${value.serviceTimeNanos}")
+              res    <- Forbidden()
+            } yield res
+            case None => for{
+              _                  <- IO.unit
+              unavailableNodeIds = operations.map(_.nodeId)
+              availableNodexs    = nodexsL.filterNot(nxs => unavailableNodeIds.contains(nxs.nodeId))
+              unavailableNodexs  = nodexsL.filter(x=> unavailableNodeIds.contains(x.nodeId))
+              isCompleted        = operations.nonEmpty
+              pendingPuts        = EventXOps.onlyPendingPuts(events = events)
+              pendingGets        = EventXOps.onlyPendingGets(events = events)
+              pendingNodes       = (pendingPuts.map(_.nodeId) ++ pendingGets.map(_.nodeId)).distinct
+              program            = {
+                maybeOperationBySerial match {
+                  case Some(value) =>
+                    for {
+                      _   <- ctx.logger.debug(s"OPERATION_ALREADY_COMPLETED ${value.operationId} ${value.objectId} ${value.serviceTimeNanos}")
+                      res <- Forbidden()
+                    } yield res
+                  case None => for {
+                    _ <- IO.unit
 
-          _                  <- if(uphs.collaborative) {
-            val pr = PendingReplication(
-              objectId             = uphs.objectId,
-              objectSize           = uphs.objectSize,
-              rf                   = uphs.replicaNodes.length,
-              replicationTechnique = uphs.replicationTechnique,
-              replicaNodes         = uphs.replicaNodes
-//                replicaNodes.toSet.diff(Set(pivotReplicaNode)).toList
-            )
-            ctx.state.update{
-              s=>{
-                val pendingReplicas    = s.pendingReplicas + (pr.objectId -> pr)
-                s.copy(pendingReplicas = pendingReplicas  )
+                  } yield ()
+                }
+
               }
-            }
-          } else IO.unit
 
-          pivotReplicaNodex  = nodexs(uphs.pivotReplicaNode)
-          response           <- controller(
-            operationId         = uphs.operationId,
-            objectId            = uphs.objectId,
-            blockIndex          = uphs.blockIndex,
-            definedReplicaNodes = uphs.replicaNodes.map(x=>nodexs.get(x) ).sequence.getOrElse(Nil),
-            collaborative       =  uphs.collaborative,
-            pivotReplicaNode    = pivotReplicaNodex
-          )(authReq=authReq,user=user, rawEvents=rawEvents, events=events)
-//        _____________________________________________________________
-          serviceTimeEnd     <- monotonic
-          serviceTime        = serviceTimeEnd - serviceTimeStart
-//       _______________________________________________________________________________
-          selectedNodeIds    = List.empty[String]
-//            headers.get(CIString("Node-Id")).map(x=>x.toList.map(_.value)).getOrElse(List.empty[String])
-          _                  <- ctx.logger.debug(s"SERVICE_TIME_END ${uphs.objectId} $serviceTimeEnd")
-          _                  <- ctx.logger.debug(s"SERVICE_TIME ${uphs.objectId} $serviceTime")
-//      ______________________________________________________________________________________
-          _events            = selectedNodeIds.zipWithIndex.map {
-            case (selectedNodeId, index) => Put.fromUploadHeaders(
-              nodeId = selectedNodeId,
-              userId = user.id,
-              timestamp = now,
-              serviceTimeStart,
-              serviceTimeEnd,
-              uphs
-            )
+              res                <- Ok()
+            } yield res
           }
-          selectedNodeIds    = if(uphs.collaborative) uphs.pivotReplicaNode::Nil else headers.get(CIString("Node-Id")).map(x=>x.toList.map(_.value)).getOrElse(List.empty[String]) :+ uphs.pivotReplicaNode
-          _                  <- Events.saveEvents(_events)
+//        _______________________________________________________________________________________
+//          _                  <- ctx.logger.debug(s"SERVICE_TIME_START ${uphs.objectId} $serviceTimeStart")
+//          _                  <- ctx.logger.debug(s"COLLABORATIVE ${uphs.collaborative}")
+//          _                  <- ctx.logger.debug(s"REPLICA_NODES ${uphs.replicaNodes}")
+//          _                  <- ctx.logger.debug(s"ARRIVAL_TIME ${uphs.objectId} $serviceTimeStart")
+//          latency            = serviceTimeStart - uphs.requestStartAt
+//          _                  <- ctx.logger.debug(s"LATENCY ${uphs.objectId} ${latency}")
+            //      ______________________________________________________________________________________________________________
+//        ___________________________________________________________________________________
+//          _ <- if(uphs.collaborative) {
+//            val pr = PendingReplication(
+//              objectId             = uphs.objectId,
+//              objectSize           = uphs.objectSize,
+//              rf                   = uphs.replicaNodes.length,
+//              replicationTechnique = uphs.replicationTechnique,
+//              replicaNodes         = uphs.replicaNodes
+////                replicaNodes.toSet.diff(Set(pivotReplicaNode)).toList
+//            )
+//            ctx.state.update{
+//              s=>{
+//                val pendingReplicas    = s.pendingReplicas + (pr.objectId -> pr)
+//                s.copy(pendingReplicas = pendingReplicas  )
+//              }
+//            }
+//          } else IO.unit
+//        _________________________________________
+//          pivotReplicaNodex = nodexs(uphs.pivotReplicaNode)
+//          response             <- controller(
+//            operationId         = uphs.operationId,
+//            objectId            = uphs.objectId,
+//            blockIndex          = uphs.blockIndex,
+//            definedReplicaNodes = uphs.replicaNodes.map(x=>nodexs.get(x) ).sequence.getOrElse(Nil),
+//            collaborative       = uphs.collaborative,
+//            pivotReplicaNode    = pivotReplicaNodex
+//          )(authReq=authReq,user=user, rawEvents=rawEvents, events=events)
+////        _____________________________________________________________
+//          serviceTimeEnd     <- monotonic
+//          serviceTime        = serviceTimeEnd - serviceTimeStart
+////       _______________________________________________________________________________
+//          selectedNodeIds    = List.empty[String]
+////            headers.get(CIString("Node-Id")).map(x=>x.toList.map(_.value)).getOrElse(List.empty[String])
+//          _                  <- ctx.logger.debug(s"SERVICE_TIME_END ${uphs.objectId} $serviceTimeEnd")
+//          _                  <- ctx.logger.debug(s"SERVICE_TIME ${uphs.objectId} $serviceTime")
 //      ______________________________________________________________________________________
-          newResponse        = response.putHeaders(
-            Headers(
-              Header.Raw(CIString("Latency"),latency.toString),
-              Header.Raw(CIString("Service-Time"),serviceTime.toString),
-              Header.Raw(CIString("Service-Time-Start"), serviceTimeStart.toString),
-              Header.Raw(CIString("Service-Time-End"), serviceTimeEnd.toString),
-            )
-          )
+//          _events            = selectedNodeIds.zipWithIndex.map {
+//            case (selectedNodeId, index) => Put.fromUploadHeaders(
+//              nodeId = selectedNodeId,
+//              userId = user.id,
+//              timestamp = now,
+//              serviceTimeStart,
+//              serviceTimeEnd,
+//              uphs
+//            )
+//          }
+//          selectedNodeIds    = List.empty[String]
+//            if(uphs.collaborative) uphs.pivotReplicaNode::Nil else Nil
+//          else headers.get(CIString("Node-Id")).map(x=>x.toList.map(_.value)).getOrElse(List.empty[String]) :+ uphs.pivotReplicaNode
+//          _                  <- Events.saveEvents(_events)
+//      ______________________________________________________________________________________
+//          newResponse        = response.putHeaders(
+//            Headers(
+//              Header.Raw(CIString("Latency"),latency.toString),
+//              Header.Raw(CIString("Service-Time"),serviceTime.toString),
+//              Header.Raw(CIString("Service-Time-Start"), serviceTimeStart.toString),
+//              Header.Raw(CIString("Service-Time-End"), serviceTimeEnd.toString),
+//            )
+//          )
           _                  <- ctx.logger.debug("____________________________________________________")
           _                  <- s.release
-        } yield newResponse
+        } yield rex
 //      ______________________________________________________________________________________
         program.handleErrorWith{e=>
           ctx.logger.debug(e.getMessage)  *> InternalServerError()

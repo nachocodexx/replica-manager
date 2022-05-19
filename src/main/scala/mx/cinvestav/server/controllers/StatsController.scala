@@ -96,6 +96,10 @@ object StatsController {
 //        globalSTs         = global.map(_.serviceTimeNanos)
 //        globalQueueTimes  = EventXOps.calculateQueueTimes(arrivalTimes = globalATs,serviceTimes = globalSTs)
 //      ______________________________________________________________________________________________________________________________________________
+        pendingPuts        = EventXOps.onlyPendingPuts(events = events)
+        pendingGets        = EventXOps.onlyPendingGets(events = events)
+        pendingNodes       = (pendingPuts.map(_.nodeId) ++ pendingGets.map(_.nodeId)).distinct
+
         _ <- IO.unit
         stats              = Map(
           "nodeId"                   -> ctx.config.nodeId.asJson,
@@ -117,7 +121,8 @@ object StatsController {
           "apiVersion" -> ctx.config.apiVersion.asJson,
           "queue" -> queueInfo.asJson,
           "queueByNode" -> queueInfoByNode.asJson,
-          "pendingReplication" -> pendingReplicas.asJson
+          "pendingReplication" -> pendingReplicas.asJson,
+          "pendingNodes"-> pendingNodes.asJson
 
         )
         response <- Ok(stats)

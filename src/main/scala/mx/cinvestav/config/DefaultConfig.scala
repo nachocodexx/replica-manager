@@ -114,11 +114,12 @@ case class DefaultConfig(
                           maxConnections:Int,
                           bufferSize:Int,
                           responseHeaderTimeoutMs:Long,
-                          nSemaphore:Int = 1,
-                          replicationTransferType:String,
-                          systemReplicationEnabled:Boolean,
-                          defaultImpactFactor:Double = 0.0,
+                          elasticity:Boolean,
                           availableResources:Int,
                           replicationFactor:Int,
-                          elasticity:Boolean
+                          systemReplicationEnabled:Boolean,
+                          replicationTechnique:String,
+                          replicationTransferType:String,
+                          nSemaphore:Int = 1,
+                          defaultImpactFactor:Double = 0.0,
                         )
