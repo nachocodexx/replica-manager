@@ -55,6 +55,7 @@ object AddNode {
           correlationId = operationId,
           monotonicTimestamp = 0L
         )
+        _                <- ctx.state.update{s=>s.copy(nodeQueue = s.nodeQueue + (payload.nodeId -> Nil) )}
         _                <- Events.saveEvents(events =newEvent ::Nil)
         response         <- NoContent()
       } yield response

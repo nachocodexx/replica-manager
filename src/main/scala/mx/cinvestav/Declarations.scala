@@ -118,7 +118,7 @@ object Declarations {
                                )
 
 
-  case class QueueOperation(arrivalTime:Long,serialNumber:Int,objectId:String,clientId:String="")
+  case class QueueOperation(arrivalTime:Long,operationId:String,serialNumber:Int,objectId:String,objectSize:Long=0L,clientId:String="",pullOrPushFrom:String="",transferType:String="PUSH")
 //  case class PendingOperation()
   case class NodeState(
                         status:Status,
@@ -132,10 +132,12 @@ object Declarations {
                         replicationFactor:Int = 0,
                         availableResources:Int = 5,
                         replicationTechnique:String = "ACTIVE",
-                        currentOperation:QueueOperation = QueueOperation(0,0,""),
+                        currentOperation:QueueOperation = QueueOperation(0,"",0,""),
                         clientOperations:Map[String,List[QueueOperation] ] = Map.empty[String,List[QueueOperation]],
+                        nodeQueue:Map[String,List[QueueOperation] ] = Map.empty[String,List[QueueOperation]],
                         lastOperation:Int = 0,
-                        pendingOperations:Map[String,QueueOperation]
+                        pendingOperations:Map[String,QueueOperation]=Map.empty[String,QueueOperation],
+
                         )
   case class NodeContext(
                             config: DefaultConfig,
@@ -169,6 +171,7 @@ object Declarations {
         replicationTransferType = headers.get(CIString("Replication-Transfer-Type")).map(_.head.value).getOrElse(ctx.config.replicationTransferType)
         replicaNodes            = headers.get(CIString("Replica-Node")).map(_.map(_.value).toList).getOrElse(Nil)
         pivotReplicaNode        = headers.get(CIString("Pivot-Replica-Node")).map(_.head.value).getOrElse("PIVOT_REPLICA_NODE")
+        replicationFactor       = headers.get(CIString("Replication-Factor")).map(_.head.value).flatMap(_.toIntOption).getOrElse(0)
         _blockId                = s"${objectId}_${blockIndex}"
         blockId                 = headers.get(CIString("Block-Id")).map(_.head.value).getOrElse(_blockId)
 //      __________________________________________________________________________________________________________________
@@ -191,7 +194,9 @@ object Declarations {
           replicationTransferType = replicationTransferType,
           blockId                 = blockId,
           clientId                = clientId,
-          pivotReplicaNode        = pivotReplicaNode
+          pivotReplicaNode        = pivotReplicaNode,
+          replicationFactor       = replicationFactor,
+          correlationId           = ""
         )
       } yield upheaders
     }

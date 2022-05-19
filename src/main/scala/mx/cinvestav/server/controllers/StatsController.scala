@@ -36,6 +36,7 @@ object StatsController {
         currentState       <- ctx.state.get
         pendingReplicas    = currentState.pendingReplicas.filter(_._2.rf>0)
         rawEvents          = currentState.events
+        nodesQueue         = currentState.nodeQueue
         events             = Events.orderAndFilterEventsMonotonicV2(events = rawEvents)
         ars                = EventXOps.getAllNodeXs(events=events).map { node =>
               val nodeId = node.nodeId
@@ -122,7 +123,8 @@ object StatsController {
           "queue" -> queueInfo.asJson,
           "queueByNode" -> queueInfoByNode.asJson,
           "pendingReplication" -> pendingReplicas.asJson,
-          "pendingNodes"-> pendingNodes.asJson
+          "pendingNodes"-> pendingNodes.asJson,
+          "nodesQueue" -> nodesQueue.asJson
 
         )
         response <- Ok(stats)

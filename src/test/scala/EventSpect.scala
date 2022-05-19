@@ -154,11 +154,15 @@ class EventSpect extends munit .CatsEffectSuite {
   }
 
   test("String hash"){
-    val cache0Id = "cache-0"
-    val cache1Id = "cache-1"
-    val xs = List.empty[Int]
-    println(xs.sum)
-    println(cache0Id.hashCode,cache1Id.hashCode)
+    val x = Map("a" -> List.empty[String] , "b"-> List("A","B"))
+    val y = Map("a"-> List("A"),"c"->List("A"),"b"->List("C","D","E") )
+    val z = x |+| y
+    println(z)
+//    val cache0Id = "cache-0"
+//    val cache1Id = "cache-1"
+//    val xs = List.empty[Int]
+//    println(xs.sum)
+//    println(cache0Id.hashCode,cache1Id.hashCode)
   }
 
   test("Monotonic"){
