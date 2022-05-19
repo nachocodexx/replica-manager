@@ -92,21 +92,7 @@ object Declarations {
   }
 
 
-//  case class BalanceResponse(
-//                             nodeId:String,
-//                             dockerPort:Int,
-//                             publicPort:Int,
-//                             internalIp:String,
-//                             timestamp:Long,
-//                             apiVersion:Int,
-//                             dockerURL:String,
-//                             operationId:String,
-//                             objectId:String,
-//                             ufs:NodeUFs
-//                             )
-//  object BalanceResponse {
-//    def empty = BalanceResponse(nodeId = "",dockerPort = 0, publicPort =0,internalIp = "", timestamp = 0L, apiVersion = 0,dockerURL ="",operationId = "",objectId="",ufs = NodeUFs.empty())
-//  }
+  case class PendingSystemReplica(rf:Int,ar:Int,mandatory:Boolean = false)
 
   case class User(id:String,bucketName:String)
 
@@ -120,12 +106,6 @@ object Declarations {
                            level:Int
                          )
   case class ReplicationResponse(guid:String,replicas:List[String],milliSeconds:Long,timestamp:Long,rf:Int=1)
-//  case class NodeX(nodeId:String, ip:String, port:Int, metadata:Map[String,String]= Map.empty[String,String]){
-//    def httpUrl = s"http://$ip:$port"
-//  }
-
-
-//  case class SchemaMap(node:String,downloadCounter:Int)
   case class ObjectNodeKey(objectId:String,nodeId:String)
   case class ObjectId(value:String){
     def toObjectNodeKey(nodeId:String): ObjectNodeKey = ObjectNodeKey(value,nodeId)
@@ -144,30 +124,15 @@ object Declarations {
   case class NodeState(
                         status:Status,
                         ip:String,
-//                        lb:Option[Balancer[NodeX]]=None,
-//                        uploadBalancer:Option[BalancerV3]=None,
-//                        downloadBalancer:Option[BalancerV3]=None,
                         downloadBalancerToken:String="ROUND_ROBIN",
                         uploadBalancerToken:String="ROUND_ROBIN",
-//                        extraDownloadBalancer:Option[BalancerV3]= None,
                         events:List[EventX] = Nil,
                         pendingReplicas:Map[String,PendingReplication] = Map.empty[String,PendingReplication],
-                        misses:Map[String,Int] = Map.empty[String,Int]
-//                        monitoringEvents:List[EventX]= Nil,
-//                        monitoringEx:Map[String,EventX]= Map.empty[String,EventX],
-//                        infos:List[Monitoring.NodeInfo] = Nil
-//                        systemRepSignal:SignallingRef[IO,Boolean],
-//                        systemSemaphore:Semaphore[IO],
-//                        serviceReplicationDaemon:Boolean,
-//                        serviceReplicationThreshold:Double,
-//                        maxAR:Int,
-//                        maxRF:Int,
-//                        balanceTemperature:Boolean,
-//                        replicationDaemon:Boolean,
-//                        replicationDaemonDelayMillis:Long,
-//                        replicationStrategy:String,
-//                        experimentId:String,
-//                        replicationDaemonSingal:SignallingRef[IO,Boolean],
+                        pendingSystemReplicas:List[PendingSystemReplica] = Nil,
+                        misses:Map[String,Int] = Map.empty[String,Int],
+                        replicationFactor:Int = 0,
+                        availableResources:Int = 5,
+                        replicationTechnique:String = "ACTIVE"
                         )
   case class NodeContext(
                             config: DefaultConfig,
@@ -218,7 +183,8 @@ object Declarations {
           replicaNodes            = replicaNodes,
           replicationTechnique    = replicationTechnique,
           replicationTransferType = replicationTransferType,
-          blockId                 = blockId
+          blockId                 = blockId,
+//          clientId = ???, serialNumber = ???, pivotReplicaNode = ???, correlationId = ???
         )
       } yield upheaders
     }

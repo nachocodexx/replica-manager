@@ -25,9 +25,6 @@ import pureconfig.generic.auto._
 import concurrent.duration._
 import language.postfixOps
 //
-import io.circe._
-import io.circe.generic.auto._
-import io.circe.syntax._
 
 import java.net.InetAddress
 
@@ -38,14 +35,15 @@ object Main extends IOApp {
   val unsafeErrorLogger: SelfAwareStructuredLogger[IO] = Slf4jLogger.getLoggerFromName("error")
 //
   def initContext(client:Client[IO]): IO[NodeContext] = for {
-//
-//    initTime        <- 0.pure[IO]
-    _               <- Logger[IO].debug(s"CACHE_POOL[${config.nodeId}]")
+    _               <- Logger[IO].debug(s"POOL[${config.nodeId}]")
     _initState      = NodeState(
       status                = commons.status.Up,
       ip                    = InetAddress.getLocalHost.getHostAddress,
       downloadBalancerToken = config.downloadLoadBalancer,
-      uploadBalancerToken   = config.uploadLoadBalancer
+      uploadBalancerToken   = config.uploadLoadBalancer,
+      replicationFactor     = config.replicationFactor,
+      availableResources    = config.availableResources,
+      replicationTechnique  = config.replicationTechnique
     )
     state                   <- IO.ref(_initState)
     systemReplicationSignal <- SignallingRef[IO,Boolean](false)
@@ -55,7 +53,7 @@ object Main extends IOApp {
       state                   = state,
       errorLogger             = unsafeErrorLogger,
       client                  = client,
-      systemReplicationSignal = systemReplicationSignal
+      systemReplicationSignal = systemReplicationSignal,
     )
   } yield ctx
 

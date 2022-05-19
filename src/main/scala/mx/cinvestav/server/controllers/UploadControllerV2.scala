@@ -5,10 +5,10 @@ import cats.data.NonEmptyList
 import cats.effect.IO
 import cats.effect.std.Semaphore
 import mx.cinvestav.Declarations.UploadHeadersOps
+import mx.cinvestav.Declarations.PendingSystemReplica
 import mx.cinvestav.commons.types.PendingReplication
 import org.http4s.Response
-//import mx.cinvestav.Declarations.BalanceResponse
-import mx.cinvestav.commons.events.{EventXOps, PutCompleted}
+import mx.cinvestav.commons.events.EventXOps
 import mx.cinvestav.commons.types.DumbObject
 //import mx.cinvestav.con
 //
@@ -16,7 +16,7 @@ import mx.cinvestav.Declarations.{NodeContext, User}
 import mx.cinvestav.Helpers
 import mx.cinvestav.commons.balancer.v3.Balancer
 import mx.cinvestav.commons.events.Put
-import mx.cinvestav.commons.types.{NodeX,Monitoring,BalanceResponse}
+import mx.cinvestav.commons.types.{NodeX,BalanceResponse}
 import mx.cinvestav.commons.events.EventX
 import mx.cinvestav.events.Events
 import mx.cinvestav.commons.balancer.{nondeterministic,deterministic}
@@ -95,18 +95,24 @@ object UploadControllerV2 {
     userId:String,
     events:List[EventX],
     nodes:NonEmptyList[NodeX],
-    rf:Int = 1
+    pivotReplicaNode:NodeX,
+    //    nodexs:NonEmptyList[NodeX],
+    blockIndex:Int =0,
+    rf:Int = 1,
+    _replicationTechique:String = "ACTIVE",
+    replicaNodes:List[NodeX] = Nil,
+    collaborative:Boolean = false,
   )(implicit ctx:NodeContext) = {
     for {
       _                  <- IO.unit
-      maybeSelectedNode  = balance(events= events)(objectSize = objectSize,nodes = nodes,rf = rf)
+      maybeSelectedNode  = if(collaborative && replicaNodes.nonEmpty)  replicaNodes.some else balance(events= events)(objectSize = objectSize,nodes = nodes,rf = rf)
       response          <- maybeSelectedNode match {
         case Some(nodes)  =>
           val nNodes  = nodes.length
           val diffRF  = rf - nNodes
 
           val program = for {
-              _        <- ctx.logger.debug(s"SELECTED_NODES $nodes")
+              _        <- ctx.logger.debug(s"SELECTED_NODES ${nodes.map(_.nodeId)}")
               xs       <- nodes.zipWithIndex.traverse{
                 case (node,index) =>
                   for {
@@ -133,7 +139,7 @@ object UploadControllerV2 {
                           timestamp   = timestamp,
                           apiVersion  = apiVersionNum,
                           dockerURL   = nodeUri,
-                          operationId = s"${operationId}_$index",
+                          operationId = s"${operationId}_$blockIndex",
                           objectId    = objectId,
                           ufs         = node.ufs
                         )
@@ -162,19 +168,37 @@ object UploadControllerV2 {
             case 0 => program
             case x =>
               for {
-                _                  <- ctx.logger.debug(s"Replicate $x nodes")
-                xs                 <- ctx.config.systemReplication.launchNode().replicateA(x).start
-                pendingReplication = PendingReplication(objectId = objectId, objectSize = objectSize,rf = x)
-                _                  <- ctx.state.update(s=>s.copy(pendingReplicas =  s.pendingReplicas + (objectId -> pendingReplication) ))
-                res               <- program
+                _ <- IO.unit
+                pendingSystemReplicas = PendingSystemReplica( rf = rf,ar=nodes.length,mandatory = false)
+                pendingReplication    = PendingReplication(
+                  objectId             = objectId,
+                  objectSize           = objectSize,
+                  rf                   = x,
+                  replicaNodes         = replicaNodes.map(_.nodeId),
+                  replicationTechnique = _replicationTechique
+                )
+                _                     <- ctx.state.update{ s=>
+                  s.copy(
+                    pendingReplicas       =  s.pendingReplicas + (objectId -> pendingReplication),
+                    pendingSystemReplicas = s.pendingSystemReplicas:+ pendingSystemReplicas
+                  )
+                }
+                res                 <- program
               } yield res
           })
 
         case None =>
           for {
-            maybeSystemRepREs <- ctx.config.systemReplication.launchNode().start
+//            maybeSystemRepREs <- ctx.config.systemReplication.launchNode().start
             res               <- Accepted()
-//            res <- maybeSystemRepREs match {
+            _ <- IO.unit
+            pendingSystemReplicas = PendingSystemReplica( rf = rf,ar=0,mandatory = false)
+            _                     <- ctx.state.update{ s=>
+              s.copy(
+                pendingSystemReplicas = s.pendingSystemReplicas:+ pendingSystemReplicas
+              )
+            }
+            //            res <- maybeSystemRepREs match {
 //              case Some(value) =>
 //                val nodeId = value.nodeId
 //                ctx.logger.debug(s"NEW_NODE_ADDED $nodeId")
@@ -186,20 +210,28 @@ object UploadControllerV2 {
     } yield response
   }
 
-  def controller(operationId:String,objectId:String)(
+  def controller(
+                  operationId:String,
+                  objectId:String,
+                  pivotReplicaNode:NodeX,
+                  blockIndex:Int = 0,
+                  definedReplicaNodes:List[NodeX]=Nil,
+                  collaborative:Boolean = false,
+                )(
     authReq:AuthedRequest[IO,User],
     user:User,
     rawEvents:List[EventX]=Nil,
-    events:List[EventX]=Nil
+    events:List[EventX]=Nil,
   )(implicit ctx:NodeContext) =
     for {
-      currentState       <- ctx.state.get
-      req                = authReq.req
-      headers            = req.headers
-      objectSize         = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(0L)
+      currentState         <- ctx.state.get
+      req                  = authReq.req
+      headers              = req.headers
+      objectSize           = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(0L)
+      replicationTechnique = headers.get(CIString("Replication-Technique")).map(_.head.value).getOrElse(currentState.replicationTechnique)
 
-      maybeObject        = Events.getObjectByIdV3(objectId = objectId,operationId =operationId ,events=events)
-      arMap              = ctx.config.uploadLoadBalancer match {
+      maybeObject          = Events.getObjectByIdV3(objectId = objectId,operationId =operationId ,events=events)
+      arMap                = ctx.config.uploadLoadBalancer match {
         case "SORTING_UF" | "TWO_CHOICES" => EventXOps.getAllNodeXs(
           events     = rawEvents.sortBy(_.monotonicTimestamp),
           objectSize = objectSize
@@ -210,10 +242,9 @@ object UploadControllerV2 {
         ).map(x=>x.nodeId->x).toMap
       }
       //       NO EMPTY LIST OF RD's
-      maybeARNodeX       = NonEmptyList.fromList(arMap.values.toList)
-//      _ <- ctx.logger.debug(s"AR $")
-      nN                 = arMap.size
-      impactFactor       = authReq.req.headers.get(CIString("Impact-Factor"))
+      maybeARNodeX         = NonEmptyList.fromList(arMap.values.toList)
+      nN                   = arMap.size
+      impactFactor         = authReq.req.headers.get(CIString("Impact-Factor"))
         .flatMap(_.head.value.toDoubleOption)
         .map(x=> if(x==0.0) ctx.config.defaultImpactFactor else x)
         .getOrElse(1/nN.toDouble)
@@ -233,20 +264,22 @@ object UploadControllerV2 {
                  maybeSystemReplicationRes <- ctx.config.systemReplication.launchNode().start
 
                 res <- Accepted()
-//                res <- maybeSystemReplicationRes match {
-//                  case Some(systemRepRes) =>
-//                    val nodeId     = systemRepRes.nodeId
-//                    ctx.logger.debug(s"NEW_NODE $nodeId") *> Accepted()
-//                  case None => Accepted()
-//                }
               } yield res
-          } else commonCode(operationId)(
-            objectId   = objectId,
-            objectSize = objectSize,
-            userId     = user.id,
-            events     = events,
-            nodes      = NonEmptyList.fromListUnsafe(filteredNodes),
-            rf         =if(impactFactor == 0.0 ) rf  else math.ceil(impactFactor*nN).toInt
+          }
+
+          else commonCode(operationId)(
+            objectId            = objectId,
+            objectSize          = objectSize,
+            userId              = user.id,
+            events              = events,
+            nodes               = NonEmptyList.fromListUnsafe(filteredNodes),
+            rf                  = if(collaborative) definedReplicaNodes.length else if(impactFactor == 0.0 ) rf  else math.ceil(impactFactor*nN).toInt,
+
+            blockIndex          = blockIndex,
+            _replicationTechique = replicationTechnique,
+            replicaNodes        = definedReplicaNodes,
+            collaborative       = collaborative,
+            pivotReplicaNode    = pivotReplicaNode
           )
         } yield res
 
@@ -278,72 +311,70 @@ object UploadControllerV2 {
           currentState       <- ctx.state.get
           rawEvents          = currentState.events
           events             = Events.orderAndFilterEventsMonotonicV2(rawEvents)
+          nodexs             = EventXOps.getAllNodeXs(events = events).map(x=>x.nodeId-> x).toMap
 //      ______________________________________________________________________________________
           headers              = authReq.req.headers
           uphs                 <- UploadHeadersOps.fromHeaders(headers =headers)
-//          operationId          = headers.get(CIString("Operation-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
-//          objectId             = headers.get(CIString("Object-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
-//          objectSize           = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(0L)
-//          fileExtension        = headers.get(CIString("File-Extension")).map(_.head.value).getOrElse("")
-//          filePath             = headers.get(CIString("File-Path")).map(_.head.value).getOrElse(s"$objectId.$fileExtension")
-//          compressionAlgorithm = headers.get(CIString("Compression-Algorithm")).map(_.head.value).getOrElse("")
-//          requestStartAt       = headers.get(CIString("Request-Start-At")).map(_.head.value).flatMap(_.toLongOption).getOrElse(serviceTimeStart)
-//          catalogId            = headers.get(CIString("Catalog-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
-//          digest               = headers.get(CIString("Digest")).map(_.head.value).getOrElse("")
-//          blockIndex           = headers.get(CIString("Block-Index")).map(_.head.value).flatMap(_.toIntOption).getOrElse(0)
-//          blockId              = s"${objectId}_${blockIndex}"
           latency              = serviceTimeStart - uphs.requestStartAt
             //      ______________________________________________________________________________________________________________
           _                  <- ctx.logger.debug(s"LATENCY ${uphs.objectId} $latency")
           _                  <- ctx.logger.debug(s"ARRIVAL_TIME ${uphs.objectId} $serviceTimeStart")
 //      ______________________________________________________________________________________________________________
           _                  <- ctx.logger.debug(s"SERVICE_TIME_START ${uphs.objectId} $serviceTimeStart")
-//        ___________________________________________________________________________________
+            //      ______________________________________________________________________________________________________________
+          _                  <- ctx.logger.debug(s"COLLABORATIVE ${uphs.collaborative}")
+          _                  <- ctx.logger.debug(s"REPLICA_NODES ${uphs.replicaNodes}")
+          _                  <- ctx.logger.debug(s"LATENCY ${uphs.objectId} $latency")
+          _                  <- ctx.logger.debug(s"ARRIVAL_TIME ${uphs.objectId} $serviceTimeStart")
+//      ______________________________________________________________________________________________________________
+          _                  <- ctx.logger.debug(s"SERVICE_TIME_START ${uphs.objectId} $serviceTimeStart")
+
+          _                  <- if(uphs.collaborative) {
+            val pr = PendingReplication(
+              objectId             = uphs.objectId,
+              objectSize           = uphs.objectSize,
+              rf                   = uphs.replicaNodes.length,
+              replicationTechnique = uphs.replicationTechnique,
+              replicaNodes         = uphs.replicaNodes
+//                replicaNodes.toSet.diff(Set(pivotReplicaNode)).toList
+            )
+            ctx.state.update{
+              s=>{
+                val pendingReplicas    = s.pendingReplicas + (pr.objectId -> pr)
+                s.copy(pendingReplicas = pendingReplicas  )
+              }
+            }
+          } else IO.unit
+
+          pivotReplicaNodex  = nodexs(uphs.pivotReplicaNode)
           response           <- controller(
-            operationId=operationId,
-            objectId=objectId,
+            operationId         = uphs.operationId,
+            objectId            = uphs.objectId,
+            blockIndex          = uphs.blockIndex,
+            definedReplicaNodes = uphs.replicaNodes.map(x=>nodexs.get(x) ).sequence.getOrElse(Nil),
+            collaborative       =  uphs.collaborative,
+            pivotReplicaNode    = pivotReplicaNodex
           )(authReq=authReq,user=user, rawEvents=rawEvents, events=events)
 //        _____________________________________________________________
           serviceTimeEnd     <- monotonic
           serviceTime        = serviceTimeEnd - serviceTimeStart
 //       _______________________________________________________________________________
-          headers            = response.headers
-          selectedNodeIds    = headers.get(CIString("Node-Id")).map(x=>x.toList.map(_.value)).getOrElse(List.empty[String])
+          selectedNodeIds    = List.empty[String]
+//            headers.get(CIString("Node-Id")).map(x=>x.toList.map(_.value)).getOrElse(List.empty[String])
           _                  <- ctx.logger.debug(s"SERVICE_TIME_END ${uphs.objectId} $serviceTimeEnd")
           _                  <- ctx.logger.debug(s"SERVICE_TIME ${uphs.objectId} $serviceTime")
 //      ______________________________________________________________________________________
-          _events            = selectedNodeIds.zipWithIndex.map{
-            case (selectedNodeId,index) =>
-              Put.fromUploadHeaders(
-                nodeId = selectedNodeId,
-                userId = user.id,
-                timestamp = now,
-                serviceTimeStart,
-                serviceTimeEnd,
-                uphs
-              )
-//            Put(
-//              replication          = false,
-//              serialNumber         = 0,
-//              objectId             = objectId,
-//              objectSize           = objectSize,
-//              timestamp            = now,
-//              nodeId               = selectedNodeId,
-//              serviceTimeNanos     = serviceTime,
-//              userId               = user.id,
-//              serviceTimeEnd       = serviceTimeEnd,
-//              serviceTimeStart     = serviceTimeStart,
-//              correlationId        = s"${operationId}_$index",
-//              monotonicTimestamp   = 0L,
-//              blockId              = blockId,
-//              catalogId            = catalogId,
-//              realPath             = filePath,
-//              digest               = digest,
-//              compressionAlgorithm = compressionAlgorithm,
-//              extension            = fileExtension
-//            )
+          _events            = selectedNodeIds.zipWithIndex.map {
+            case (selectedNodeId, index) => Put.fromUploadHeaders(
+              nodeId = selectedNodeId,
+              userId = user.id,
+              timestamp = now,
+              serviceTimeStart,
+              serviceTimeEnd,
+              uphs
+            )
           }
-//          _ <- ctx.logger.debug(_events.toString)
+          selectedNodeIds    = if(uphs.collaborative) uphs.pivotReplicaNode::Nil else headers.get(CIString("Node-Id")).map(x=>x.toList.map(_.value)).getOrElse(List.empty[String]) :+ uphs.pivotReplicaNode
           _                  <- Events.saveEvents(_events)
 //      ______________________________________________________________________________________
           newResponse        = response.putHeaders(

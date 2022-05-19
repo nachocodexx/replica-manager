@@ -7,10 +7,7 @@ import mx.cinvestav.Declarations.NodeContext
 import mx.cinvestav.commons.docker.Image
 import mx.cinvestav.commons.types.SystemReplicationResponse
 import org.http4s._
-//import org.http4s.Me
-//import org.http4s.blaze.http.http2.PseudoHeaders.Method
 import org.http4s.{Request, Uri}
-//
 import io.circe._
 import io.circe.syntax._
 import io.circe.generic.auto._
@@ -118,8 +115,10 @@ case class DefaultConfig(
                           bufferSize:Int,
                           responseHeaderTimeoutMs:Long,
                           nSemaphore:Int = 1,
+                          replicationTransferType:String,
                           systemReplicationEnabled:Boolean,
                           defaultImpactFactor:Double = 0.0,
-                          replicationTechnique:String,
-                          replicationTransferType:String
+                          availableResources:Int,
+                          replicationFactor:Int,
+                          elasticity:Boolean
                         )

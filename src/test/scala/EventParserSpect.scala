@@ -29,6 +29,12 @@ class EventParserSpect extends munit .CatsEffectSuite {
       }
     } yield decoded
   }
+  test("a"){
+    val m = Map("a"->1,"b"->2,"d"->1)
+    val n = Map("a"->0,"c"->1,"b"->10)
+    val x =  m ++ n
+    println(x)
+  }
   test("Uri"){
     val  hostname= "system-rep-0"
     val port = 1025

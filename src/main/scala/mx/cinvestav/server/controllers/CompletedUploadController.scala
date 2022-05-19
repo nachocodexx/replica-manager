@@ -7,6 +7,7 @@ import mx.cinvestav.commons.events.{Get, GetCompleted, Put, PutCompleted}
 import mx.cinvestav.events.Events
 import org.http4s.HttpRoutes
 import org.http4s.dsl.io._
+import org.typelevel.ci.CIString
 //{->, /, InternalServerError, NoContent, NotFound, POST, Root}
 import mx.cinvestav.commons.events.EventXOps
 
@@ -14,18 +15,24 @@ object CompletedUploadController {
 
 
   def apply()(implicit ctx:NodeContext) = HttpRoutes.of[IO]{
-
-    //    __________________________________________________________________________________
-    case req@POST -> Root / "upload" / operationId / objectId =>
+    case req@POST -> Root / "upload" / operationId / objectId / IntVar(blockIndex) =>
       val program = for {
+//        _            <- IO.sleep(ctx.config.del)
         currentState <- ctx.state.get
         //      ________________________________________________________________________
         events       = Events.filterEventsMonotonicV2(events = currentState.events)
-        puts         = Events.onlyPutos(events = events).map(_.asInstanceOf[Put])
-//        _            <- ctx.logger.debug(s"OPERATION_ID $operationId")
-//        _            <- ctx.logger.debug(s"OBJECT_ID $objectId")
+        puts         = EventXOps.onlyPuts(events = events).map(_.asInstanceOf[Put])
+        headers      = req.headers
+        nodeId       = headers.get(CIString("Node-Id")).map(_.head.value).getOrElse("NODE_ID")
+        _            <- ctx.logger.debug(s"OPERATION_ID $operationId")
+        _            <- ctx.logger.debug(s"OBJECT_ID $objectId")
+        _            <- ctx.logger.debug(s"BLOCK_INDEX $blockIndex")
+        _            <- ctx.logger.debug(s"NODE_ID $nodeId")
 //        _            <- ctx.logger.debug(puts.toString)
-        maybePut     = puts.find(p => p.correlationId == operationId && p.objectId == objectId)
+        operationBlockId      = s"${operationId}_$blockIndex"
+        _ <- ctx.logger.debug(puts.toString)
+        maybePut     = puts.find(p => p.correlationId == operationBlockId && p.objectId == objectId && p.nodeId == nodeId)
+        _<-ctx.logger.debug("MAYBE_PUT "+maybePut.toString)
         //      ________________________________________________________________________
         res          <- maybePut match {
           case Some(put) => for {
@@ -37,6 +44,7 @@ object CompletedUploadController {
           //          ________________________________________________________________________
           case None => NotFound()
         }
+        _  <- ctx.logger.debug("__________________________________________________")
       } yield res
       program.handleErrorWith{ e =>
         ctx.errorLogger.error(e.getMessage) *> InternalServerError()

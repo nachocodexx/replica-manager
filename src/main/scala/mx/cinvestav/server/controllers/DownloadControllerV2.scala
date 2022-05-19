@@ -4,6 +4,7 @@ import cats.data.NonEmptyList
 import cats.effect._
 import cats.effect.std.Semaphore
 import cats.implicits._
+import mx.cinvestav.commons.events.GetCompleted
 import mx.cinvestav.commons.types.BalanceResponse
 //
 import mx.cinvestav.commons.balancer.{deterministic,nondeterministic}
@@ -81,7 +82,6 @@ object DownloadControllerV2 {
       } yield newResponse
   }
   //  ____________________________________________________________________
-
   def balance(locations:List[String],arMap:Map[String,NodeX],objectSize:Long,gets:List[EventX])(implicit ctx:NodeContext) = {
     val locationNodes           = locations.map(arMap)
     val filteredNodes           = locationNodes.filter(_.availableMemoryCapacity >= objectSize)
@@ -93,10 +93,19 @@ object DownloadControllerV2 {
       val filteredLocationNodeIds = filteredNodes.map(_.nodeId)
       val _locationNodeIds        = NonEmptyList.fromListUnsafe(filteredLocationNodeIds)
       ctx.config.downloadLoadBalancer match {
+        case "LEAST_HIT" =>
+          val defaultCounter   = filteredLocationNodeIds.map(_ -> 0).toMap
+          val counter          = gets.groupBy(_.nodeId)
+            .map(x=> x._1-> x._2.length)
+            .filter(x=> _locationNodeIds.contains_(x._1))
+          val _counter = counter |+| defaultCounter
+          val maybeSelectedNodeId  = _counter.minByOption(_._2).map(_._1)
+          maybeSelectedNodeId.flatMap(arMap.get)
         case "ROUND_ROBIN"   =>
           val counter          = gets.groupBy(_.nodeId).map(x=> x._1-> x._2.length).filter(x=> _locationNodeIds.contains_(x._1))
           val selectedNodeId   = deterministic.RoundRobin(nodeIds = _locationNodeIds).balanceWith(nodeIds = _locationNodeIds,counter = counter)
-          arMap.get(selectedNodeId)
+          val x = arMap.get(selectedNodeId)
+          x
         case "PSEUDO_RANDOM" =>
           val selectedNodeId = deterministic.PseudoRandom(nodeIds = _locationNodeIds).balance
           arMap.get(selectedNodeId)
@@ -119,7 +128,8 @@ object DownloadControllerV2 {
       _                     <- IO.unit
       //    __________________________________________________
       events                  = x.events
-      gets                    = EventXOps.onlyGetCompleteds(events = events)
+      gets                    = EventXOps.onlyGetCompleteds(events = events).asInstanceOf[List[GetCompleted]]
+      _gets                   = gets.filter(_.objectId == x.objectId)
       userId                  = x.userId
       objectId                = x.objectId
       objectSize              = x.objectSize
@@ -130,38 +140,8 @@ object DownloadControllerV2 {
         locations  = locations,
         arMap      = arMap,
         objectSize = objectSize,
-        gets       = gets
+        gets       = _gets
       )
-//      filteredNodes           = locationNodes.filter(_.availableMemoryCapacity >= objectSize)
-//      filteredLocationUfs     = filteredNodes.map(_.ufs)
-//      //      _____________________________________________________________________________________________________________________________________
-//      maybeSelectedNode     = if(filteredNodes.isEmpty) None
-//      else if(filteredNodes.length == 1) subsetNodes.head.some
-//      else {
-//        val filteredLocationNodeIds = filteredNodes.map(_.nodeId)
-//        val _locationNodeIds        = NonEmptyList.fromListUnsafe(filteredLocationNodeIds)
-//        ctx.config.downloadLoadBalancer match {
-//          case "ROUND_ROBIN"   =>
-////            val counter          = gets.groupBy(_.nodeId).map(x=> x._1-> x._2.length).filter(x=> _locationNodeIds.contains_(x._1))
-//            val counter                 = gets.groupBy(_.nodeId).map(x=> x._1-> x._2.length).filter(x=> _locationNodeIds.contains_(x._1))
-//            val selectedNodeId   = deterministic.RoundRobin(nodeIds = _locationNodeIds).balanceWith(nodeIds = _locationNodeIds,counter = counter)
-//            arMap.get(selectedNodeId)
-//          case "PSEUDO_RANDOM" =>
-//            val selectedNodeId = deterministic.PseudoRandom(nodeIds = _locationNodeIds).balance
-//            arMap.get(selectedNodeId)
-//          case "TWO_CHOICES"   =>
-//            val psrnd               = deterministic.PseudoRandom(nodeIds = _locationNodeIds)
-//            val maybeSelectedNodeId = nondeterministic.TwoChoices(psrnd = psrnd)
-//              .balances(ufs =  filteredLocationUfs,mapUf = _.memoryUF)
-//              .headOption
-//            maybeSelectedNodeId.flatMap(arMap.get)
-//          case "SORTING_UF" =>
-//            val maybeSelectedNodeId = nondeterministic.SortingUF()
-//              .balance(ufs = filteredLocationUfs,mapUf = _.memoryUF)
-//              .headOption
-//            maybeSelectedNodeId.flatMap(arMap.get)
-//        }
-//      }
       //      _____________________________________________________________________________________________________________________________________
       _                     <- ctx.logger.debug(s"SELECTED_NODE $maybeSelectedNode")
       response              <- maybeSelectedNode match {
@@ -244,7 +224,7 @@ object DownloadControllerV2 {
     maybePendingDownload = EventXOps.pendingGetByOperationId(events = events, operationId = operationId)
     downloadProgram      = for{
         _                    <- IO.unit
-        schema               = Events.generateDistributionSchemaV2(events = events,ctx.config.replicationMethod)
+        schema               = Events.generateDistributionSchemaV2(events = events,ctx.config.replicationTechnique)
         arMap                = EventXOps.getAllNodeXs(events = events,objectSize = objectSize).map(x=>x.nodeId->x).toMap
         maybeLocations       = schema.get(objectId)
         preDownloadParams    = PreDownloadParams(
@@ -279,7 +259,7 @@ object DownloadControllerV2 {
     currentState      <- ctx.state.get
     rawEvents         = currentState.events
     events            = Events.orderAndFilterEventsMonotonicV2(rawEvents)
-    schema            = Events.generateDistributionSchemaV2(events = events,ctx.config.replicationMethod)
+    schema            = Events.generateDistributionSchemaV2(events = events,ctx.config.replicationTechnique)
     arMap             = EventXOps.getAllNodeXs(events = events).map(x=>x.nodeId->x).toMap
     objects           = EventXOps
       .onlyPutCompleteds(events = events)
@@ -348,6 +328,7 @@ object DownloadControllerV2 {
           operationId          = headers.get(CIString("Operation-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
           objectSize           = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(0L)
           requestStartAt       = headers.get(CIString("Request-Start-At")).map(_.head.value).flatMap(_.toLongOption).getOrElse(serviceTimeStart)
+          arrivalTime          = headers.get(CIString("Arrival-Time")).map(_.head.value).flatMap(_.toLongOption).getOrElse(serviceTimeStart)
           latency              = serviceTimeStart - requestStartAt
           dumbObject           = DumbObject(objectId = objectId, objectSize = objectSize)
           //      _________________________________________________________________________
@@ -372,7 +353,7 @@ object DownloadControllerV2 {
               correlationId    = operationId,
               serviceTimeEnd   = serviceTimeEnd,
               serviceTimeStart = serviceTimeStart,
-              //          waitingTime      = waitingTime
+              arrivalTime      = arrivalTime
             )
              Events.saveEvents(events = get::Nil) *> ctx.logger.info(s"DOWNLOAD $objectId $selectedNodeId $serviceTime $operationId")
           } else ctx.logger.debug(s"NO_AVAILABLE_NODE $operationId $objectId")

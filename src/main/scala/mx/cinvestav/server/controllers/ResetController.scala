@@ -6,8 +6,9 @@ import mx.cinvestav.Declarations.NodeContext
 import mx.cinvestav.Helpers
 import mx.cinvestav.commons.events
 import mx.cinvestav.commons.events.EventX
+import mx.cinvestav.commons.types.PendingReplication
 import mx.cinvestav.events.Events
-import org.http4s.{HttpRoutes, Request, Uri,Method}
+import org.http4s.{HttpRoutes, Method, Request, Uri}
 import org.http4s.implicits._
 import org.http4s.dsl.io._
 
@@ -28,6 +29,7 @@ object ResetController {
               case _:Events.UpdatedNetworkCfg => true
               case _=>false
             },
+            pendingReplicas = Map.empty[String,PendingReplication]
           )
 
         }
