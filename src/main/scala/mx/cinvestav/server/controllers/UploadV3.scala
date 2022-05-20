@@ -7,7 +7,7 @@ import org.http4s._
 import org.http4s.implicits._
 import org.http4s.dsl.io._
 import mx.cinvestav.commons.types.ReplicationSchema
-import
+import org.http4s.circe.CirceEntityDecoder._
 import io.circe.syntax._
 import io.circe.generic.auto._
 
