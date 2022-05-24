@@ -86,6 +86,11 @@ object Declarations {
       case hot:GetCompleted => hot.asJson
 
     }
+    implicit val operationEncoder:Encoder[Operation] = {
+      case d: Download => d.asJson
+      case u: Upload => u.asJson
+      case _ => Json.Null
+    }
   }
 
 
@@ -118,7 +123,39 @@ object Declarations {
                                )
 
 
+  trait Operation  {
+    def operationId:String
+    def serialNumber:Int
+    def arrivalTime:Long
+    def objectId:String
+    def objectSize:Long
+    def clientId:String
+    def metadata:Map[String,String]
+    def nodeId:String
+  }
+  case class Upload(operationId:String,
+                    serialNumber:Int,
+                    arrivalTime:Long,
+                    objectId:String,
+                    objectSize:Long,
+                    clientId:String,
+                    nodeId:String,
+                    metadata:Map[String,String] = Map.empty[String,String]
+                   ) extends Operation
+  case class Download(
+                       operationId:String,
+                       serialNumber:Int,
+                       arrivalTime:Long,
+                       objectId:String,
+                       objectSize:Long,
+                       clientId:String,
+                       nodeId:String,
+                       metadata:Map[String,String] = Map.empty[String,String]
+                     ) extends Operation
+
   case class QueueOperation(arrivalTime:Long,operationId:String,serialNumber:Int,objectId:String,objectSize:Long=0L,clientId:String="",pullOrPushFrom:String="",transferType:String="PUSH")
+
+
 //  case class PendingOperation()
   case class NodeState(
                         status:Status,
@@ -132,11 +169,12 @@ object Declarations {
                         replicationFactor:Int = 0,
                         availableResources:Int = 5,
                         replicationTechnique:String = "ACTIVE",
-                        currentOperation:QueueOperation = QueueOperation(0,"",0,""),
-                        clientOperations:Map[String,List[QueueOperation] ] = Map.empty[String,List[QueueOperation]],
-                        nodeQueue:Map[String,List[QueueOperation] ] = Map.empty[String,List[QueueOperation]],
-                        lastOperation:Int = 0,
-                        pendingOperations:Map[String,QueueOperation]=Map.empty[String,QueueOperation],
+//                        currentOperation:QueueOperation = QueueOperation(0,"",0,""),
+//                        clientOperations:Map[String,List[QueueOperation] ] = Map.empty[String,List[QueueOperation]],
+                        nodeQueue:Map[String,List[Operation] ] = Map.empty[String,List[Operation]],
+                        lastSerialNumber:Int =0,
+//                        lastOperation:Int = 0,
+//                        pendingOperations:Map[String,QueueOperation]=Map.empty[String,QueueOperation],
 
                         )
   case class NodeContext(

@@ -4,7 +4,7 @@ import cats.effect._
 import mx.cinvestav.Declarations.NodeContext
 import mx.cinvestav.Helpers
 import mx.cinvestav.commons.events.AddedNode
-import mx.cinvestav.commons.events.ServiceReplicator.AddedService
+import mx.cinvestav.commons.events.ServiceReplicator.AddedStorageNode
 import mx.cinvestav.commons.types.NodeX
 import mx.cinvestav.events.Events
 
@@ -33,7 +33,7 @@ object AddNode {
       nodes            = Events.onlyAddedNode(events=events)
       maxAR            = ctx.config.availableResources
       response         <- if(nodes.length < maxAR) for {
-        payload        <- req.as[AddedService]
+        payload        <- req.as[AddedStorageNode]
         eventId        = UUID.randomUUID()
         headers        = req.headers
         timestamp      = headers.get(CIString("Timestamp")).flatMap(_.head.value.toLongOption)
@@ -48,8 +48,6 @@ object AddNode {
           port      = payload.port,
           totalStorageCapacity = payload.totalStorageCapacity,
           totalMemoryCapacity =payload.totalMemoryCapacity,
-          cacheSize = payload.cacheSize,
-          cachePolicy = payload.cachePolicy,
           timestamp = arrivalTime,
           serviceTimeNanos =serviceTimeNanos,
           correlationId = operationId,

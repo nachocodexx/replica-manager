@@ -17,7 +17,6 @@ import java.time
 import cats.data.NonEmptyList
 import cats.implicits._
 import cats.effect._
-import mx.cinvestav.commons.balancer.v3.UF
 import mx.cinvestav.commons.events.{EventX, EventXOps, Evicted, Get, Put, Replicated,TransferredTemperature}
 import mx.cinvestav.commons.types.{NodeX,DumbObject}
 import mx.cinvestav.events.Events
@@ -27,8 +26,6 @@ import java.util.UUID
 //
 import mx.cinvestav.Declarations.{NodeContext, ObjectId,CreateNodeResponse}
 import mx.cinvestav.Declarations.Implicits._
-import mx.cinvestav.commons.balancer.v2.Balancer
-import mx.cinvestav.commons.balancer.v3.{RoundRobin,PseudoRandom,Balancer=>BalancerV3,TwoChoices}
 import mx.cinvestav.Declarations.{PushResponse, ReplicationResponse}
 //import mx.cinvestav.commons.t
 //

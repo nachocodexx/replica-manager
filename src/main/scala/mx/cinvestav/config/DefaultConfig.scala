@@ -5,7 +5,7 @@ import cats.effect._
 import io.circe.Json
 import mx.cinvestav.Declarations.NodeContext
 import mx.cinvestav.commons.docker.Image
-import mx.cinvestav.commons.types.SystemReplicationResponse
+import mx.cinvestav.commons.types.{NodeReplicationSchema, SystemReplicationResponse}
 import org.http4s._
 import org.http4s.{Request, Uri}
 import io.circe._
@@ -49,20 +49,16 @@ case class SystemReplication(protocol:String="http", ip:String="127.0.0.1", host
 
 //  }
 
-  def createNode(
-                  cacheSize:Int = 100,
-                  policy:String = "LFU",
-                  networkName:String = "my-net",
-                  environments:Map[String,String]= Map.empty[String,String],
-                  image:Image =Image(repository = "nachocode/cache-node", tag = Some("v2"))
-                )(implicit ctx:NodeContext) = {
-    val json = Json.obj(
-      "cacheSize" -> cacheSize.asJson,
-      "policy" -> policy.asJson,
-      "networkName" -> networkName.asJson,
-      "environments" -> environments.asJson,
-      "image" -> image.asJson
-    )
+  def createNode(nrs:NodeReplicationSchema)(implicit ctx:NodeContext) = {
+    val json =  nrs.asJson
+//      Json.obj(
+//      "whath"
+//      "cacheSize" -> cacheSize.asJson,
+//      "policy" -> policy.asJson,
+//      "networkName" -> networkName.asJson,
+//      "environments" -> environments.asJson,
+//      "image" -> image.asJson
+//    )
     val req = Request[IO](
       method = Method.POST,
       uri    = this.createNodeUri
@@ -81,8 +77,12 @@ case class SystemReplication(protocol:String="http", ip:String="127.0.0.1", host
     systemReplicationSignal = ctx.systemReplicationSignal
     currentSignalValue      <- systemReplicationSignal.get
     _                       <- ctx.logger.debug(s"UPLOAD_SIGNAL_VALUE $currentSignalValue")
-    res                       <- if(ctx.config.systemReplicationEnabled && !currentSignalValue)
-    ctx.systemReplicationSignal.set(true) *> createNode().map(_.some)  <* systemReplicationSignal.set(false)
+    nrs                     = NodeReplicationSchema.empty(id = "",metadata = Map.empty[String,String])
+    res                     <- if(ctx.config.systemReplicationEnabled && !currentSignalValue) for {
+        _ <- ctx.systemReplicationSignal.set(true)
+        x <- createNode(nrs = nrs).map(_.some)
+        _ <- ctx.systemReplicationSignal.set(false)
+      } yield x
     else IO.pure(None)
   }  yield res
 

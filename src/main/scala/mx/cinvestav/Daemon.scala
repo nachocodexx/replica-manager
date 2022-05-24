@@ -272,10 +272,10 @@ object Daemon {
           nodeId -> EventXOps.processQueueTimes(
             events = events,
             nodeFilterFn = _.nodeId == nodeId,
-            mapArrivalTime = e => e match {
-              case p:Put => p.arrivalTime
-              case p:Get => p.arrivalTime
-              case e     => e.monotonicTimestamp
+            mapArrivalTime = {
+              case p: Put => p.arrivalTime
+              case p: Get => p.arrivalTime
+              case e => e.monotonicTimestamp
             }
           ),
         ).toMap
@@ -304,31 +304,32 @@ object Daemon {
     }.onError{ e =>
       ctx.logger.error(e.getMessage).pureS
     }
+//
+//
+//    val systemReplication = Stream.awakeEvery[IO](period = 5 seconds).evalMap{ _ =>
+//      for {
+//        currentState   <- ctx.state.get
+//        pendingSysReps = currentState.pendingSystemReplicas
+//        rawEvents      = currentState.events
+//        events         = Events.orderAndFilterEventsMonotonicV2(rawEvents)
+//        currentAR      = EventXOps.onlyAddedNode(events = events).length
+//        maybePSR       = pendingSysReps.maxByOption(_.rf)
+//        _              <- maybePSR match {
+//          case Some(value) =>
+//            val diff = value.rf - currentAR
+//           val x =  if(diff > 0 ) (0 until diff).toList.traverse{_ =>
+//              ctx.config.systemReplication.createNode().flatMap(x=> ctx.logger.debug(s"CREATED_NODE ${x.nodeId}"))
+//            }
+//            else IO.unit
+//            ctx.logger.debug(s"DIFF_RF $diff") *> ctx.logger.debug(s"CURRENT_AR $currentAR") *> x
+//          case None => IO.unit
+//        }
+//        _ <- ctx.state.update{s=> s.copy(pendingSystemReplicas = Nil)}
+//      } yield ()
+//    }
 
-
-    val systemReplication = Stream.awakeEvery[IO](period = 5 seconds).evalMap{ _ =>
-      for {
-        currentState   <- ctx.state.get
-        pendingSysReps = currentState.pendingSystemReplicas
-        rawEvents      = currentState.events
-        events         = Events.orderAndFilterEventsMonotonicV2(rawEvents)
-        currentAR      = EventXOps.onlyAddedNode(events = events).length
-        maybePSR       = pendingSysReps.maxByOption(_.rf)
-        _              <- maybePSR match {
-          case Some(value) =>
-            val diff = value.rf - currentAR
-           val x =  if(diff > 0 ) (0 until diff).toList.traverse{_ =>
-              ctx.config.systemReplication.createNode().flatMap(x=> ctx.logger.debug(s"CREATED_NODE ${x.nodeId}"))
-            }
-            else IO.unit
-            ctx.logger.debug(s"DIFF_RF $diff") *> ctx.logger.debug(s"CURRENT_AR $currentAR") *> x
-          case None => IO.unit
-        }
-        _ <- ctx.state.update{s=> s.copy(pendingSystemReplicas = Nil)}
-      } yield ()
-    }
-
-    replicationDaemon concurrently checkNodesDaemon concurrently systemReplication
+    replicationDaemon concurrently checkNodesDaemon
+//    concurrently systemReplication
   }
 
 }

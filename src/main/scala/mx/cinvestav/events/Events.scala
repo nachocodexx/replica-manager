@@ -29,7 +29,7 @@ import mx.cinvestav.commons.events.{Get, Put,
 }
 //import mx.cinvestav.commons.events.{AddedNode,EventX, Evicted, Missed, RemovedNode, Replicated,EventXOps}
 import mx.cinvestav.commons.types.NodeX
-import mx.cinvestav.commons.balancer.v3.UF
+//import mx.cinvestav.commons.balancer.v3.UF
 //
 import scala.collection.immutable.ListMap
 //import mx.
@@ -266,86 +266,6 @@ object Events {
   }
   nodeWithReplicaCounter
 }
-  def balanceByReplica(
-                        downloadBalancer:String="ROUND_ROBIN",
-                        objectSize:Long=0)(
-                        objectId:String,
-                        arMap:Map[String,NodeX],
-                        events:List[EventX],
-                        infos:List[Monitoring.NodeInfo] = Nil
-  )(implicit ctx:NodeContext):Option[NodeX] = {
-    import mx.cinvestav.commons.balancer.{nondeterministic,deterministic}
-    if(arMap.size == 1) arMap.head._2.some
-    else downloadBalancer match {
-      case "LEAST_CONNECTIONS" =>
-        val nodeWithReplicaCounter = getReplicaCounter(objectId,events,arMap)
-        nodeWithReplicaCounter.minByOption(_._2).flatMap{
-          case (nodeId, _) => arMap.get(nodeId)
-        }
-      case "ROUND_ROBIN" =>
-        val nodeIds = NonEmptyList.fromListUnsafe(arMap.keys.toList)
-        val counter = Events.onlyGets(events=events).map(_.asInstanceOf[Get]).filter(_.objectId==objectId).groupBy(_.nodeId).map{
-            case (nodeId,xs)=>nodeId -> xs.length
-          }
-        val defaultCounter:Map[String,Int] = nodeIds.toList.map(x=>x->0).toMap
-        val selectedNodeId = deterministic.RoundRobin(nodeIds = NonEmptyList.fromListUnsafe(arMap.keys.toList)  )
-          .balanceWith(
-            nodeIds = nodeIds.sorted,
-            counter = counter |+| defaultCounter
-          )
-        arMap.get(selectedNodeId)
-//        val nodeWithReplicaCounter = getReplicaCounter(guid,events,arMap)
-//        val totalOfReqs = nodeWithReplicaCounter.values.sum
-//        val index = totalOfReqs % nodeWithReplicaCounter.size
-//        val nodeId = nodeWithReplicaCounter.toList.get(index).map(_._1).get
-//        arMap.get(nodeId)
-      case "SORTING_UF" =>
-        None
-//        val filteredInfos = infos.filter(x=>arMap.keys.toList.contains(x.nodeId))
-//        val selectedNodeId = nondeterministic
-//          .SortingUF()
-//          .balance(
-//            infos = NonEmptyList.fromListUnsafe(filteredInfos),
-//            objectSize = objectSize,
-//            takeN = 1,
-////            mapTotalFn = _.RAMInfo.total,
-////            mapUsedFn = _.RAMInfo.used
-//          )
-
-//        selectedNodeId.headOption.flatMap(arMap.get)
-//        arMap.get(selectedNodeId.head)
-      case "TWO_CHOICES" =>
-        val filteredInfos = infos.filter(x=>arMap.keys.toList.contains(x.nodeId))
-        val selectedNodeId = nondeterministic
-          .TwoChoices(psrnd = deterministic.PseudoRandom(nodeIds = NonEmptyList.fromListUnsafe(arMap.keys.toList)))
-          .balance(info = NonEmptyList.fromListUnsafe(filteredInfos),
-            objectSize = objectSize,
-            mapTotalFn = _.RAMInfo.total,
-            mapUsedFn = _.RAMInfo.used
-          )
-        arMap.get(selectedNodeId)
-//
-      case "PSEUDO_RANDOM" =>
-        val nodeIds = NonEmptyList.fromListUnsafe(arMap.keys.toList)
-        val selectedNodeId = deterministic.PseudoRandom(
-          nodeIds = nodeIds.sorted
-        ).balance
-        arMap.get(selectedNodeId)
-//        val nodeIds =  arMap.keys.toList
-//        val randomIndex = new Random().nextInt(arMap.size)
-//        val randomNodeId = nodeIds(randomIndex)
-//        arMap.get(randomNodeId)
-      case _ =>
-        val nodeWithReplicaCounter = getReplicaCounter(objectId,events,arMap)
-        nodeWithReplicaCounter.minByOption(_._2).flatMap{
-          case (nodeId, _) => arMap.get(nodeId)
-        }
-    }
-
-
-  }
-
-  //
 
   def sequentialMonotonic(lastSerialNumber:Int,events:List[EventX]): IO[List[EventX]] = for {
     transformeEvents <- events.zipWithIndex.traverse{
@@ -504,8 +424,7 @@ object Events {
   def calculateUFs(events:List[EventX],objectSize:Long=0): Map[String, Double] = {
     getAllNodeXs(events=events)
       .map(x=>(
-        x.nodeId, UF
-        .calculate(x.totalStorageCapacity,x.usedStorageCapacity,objectSize = objectSize) )
+        x.nodeId, mx.cinvestav.commons.balancer.nondeterministic.utils.calculateUF(x.totalStorageCapacity,x.usedStorageCapacity,objectSize = objectSize) )
       )
       .toMap
   }
@@ -554,22 +473,14 @@ object Events {
     val objectsIds                = getObjectIds(events = events)
     val downloadObjectInitCounter = objectsIds.map(x=> x -> 0).toMap
    val filtered =  events.filter{
-      case e@(_:GetCompleted | _:SetDownloads) => e.monotonicTimestamp > windowTime
-//        || e.monotonicTimestamp > windowTime
-//      case _:Get | _:SetDownloads => true
+      case e:GetCompleted => e.monotonicTimestamp > windowTime
       case _ => false
     }.foldLeft(List.empty[EventX]){
      case (_events,currentEvent)=> currentEvent match {
-       case st:SetDownloads => _events.filterNot{
-         case d:GetCompleted =>d.nodeId ==st.nodeId && d.timestamp < st.timestamp && d.objectId == st.objectId
-         case d:SetDownloads =>d.nodeId ==st.nodeId && d.timestamp < st.timestamp && d.objectId == st.objectId
-         case _=> false
-       } :+ st
-       case d:Get => _events :+ d
+       case gc:GetCompleted => _events :+ gc
      }
    }.map{
      case d:GetCompleted => Map(d.nodeId -> Map(d.objectId -> 1)  )
-     case st: SetDownloads => Map(st.nodeId -> Map(st.objectId -> st.counter)  )
    }.foldLeft(Map.empty[String,Map[String,Int]  ])(_ |+| _)
      .map{
        case (objectId, value) => (objectId, downloadObjectInitCounter|+|value )
@@ -703,11 +614,31 @@ object Events {
     DenseMatrix(vectors.map(_.toArray):_*)
   }
 
-  def generateReplicaUtilization(events:List[EventX]) = {
+  def generateReplicaUtilization(events:List[EventX]): DenseMatrix[Double] = {
     val x                = Events.generateMatrixV2(events = events,windowTime = 0)
     val sumA             = (sum(x(::,*)).t).mapValues(x=>if(x==0) 1 else x)
     val xx = x(*,::) / sumA
     xx
+  }
+  def generateReplicaUtilizationMap(events:List[EventX]): Map[String, Map[String, Double]] = {
+    val objectsIds = Events.getObjectIds(events = events).sorted
+    val nodesIds   = Events.getNodeIds(events = events).sorted
+    val ru = Events.generateReplicaUtilization(events =events)
+    val xs = nodesIds.zipWithIndex.map{
+      case(nodeId,i) =>
+        objectsIds.zipWithIndex.map{
+          case (objectId,j)=>
+            nodeId -> Map(objectId -> ru.valueAt(i,j))
+        }
+    }.map{ x=>
+      val res = x.groupBy(_._1).map{
+        case (nodeId,xs) => nodeId -> xs.map(y=> y._2)
+      }.map{
+        case (nodeId,xs)=>nodeId -> xs.foldLeft(Map.empty[String,Double])(_|+|_)
+      }
+      res
+    }.foldLeft(Map.empty[String,Map[String,Double]])(_|+|_)
+    xs
   }
   def generateTemperatureMatrix(events:List[EventX]): DenseMatrix[Double] =  {
     val x = Events.generateMatrix(events=events)
@@ -832,10 +763,6 @@ object Events {
           totalStorageCapacity = an.totalStorageCapacity,
           availableStorageCapacity = an.totalStorageCapacity,
           usedStorageCapacity = 0L,
-          cacheSize = an.cacheSize,
-          usedCacheSize = 0,
-          availableCacheSize = an.cacheSize,
-          cachePolicy = an.cachePolicy,
           metadata = Map.empty[String,String]
         )
       }.toMap.map{
@@ -855,8 +782,6 @@ object Events {
         node.copy(
           usedStorageCapacity = usedStorageCapacity,
           availableStorageCapacity = availableStorageCapacity,
-          usedCacheSize = dumbObjs.length,
-          availableCacheSize = node.cacheSize - dumbObjs.length,
           metadata = Map(
             "TOTAL_REQUESTS"-> (totalGets+totalPuts).toString,
             "DOWNLOAD_REQUESTS"-> totalGets.toString,

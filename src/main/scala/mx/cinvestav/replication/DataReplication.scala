@@ -39,7 +39,8 @@ object DataReplication {
         case Some(replicaNodes) => for {
           _                     <- IO.unit
           arMap                 = ars.map(node => node.nodeId -> node).toMap
-          filteredARByCacheSize = ars.filter(_.availableCacheSize>0)
+          filteredARByCacheSize = ars
+//            .filter(_.availableCacheSize>0)
           //     SET_NODES_WITH_AVAILABLE_CACHE > 0   -  REPLICA_NODES  = {NEW_REPLICA_NODES_CANDIDATES}
           availableNodesToReplicate =  filteredARByCacheSize.map(_.nodeId).toSet.diff(replicaNodes.toSet)
             .toList

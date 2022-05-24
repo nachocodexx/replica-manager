@@ -309,8 +309,8 @@ object UploadControllerV2 {
           uphs               <- UploadHeadersOps.fromHeaders(headers = headers)
           latency              = serviceTimeStart - uphs.requestStartAt
 //       ______________________________________________________________________________
-          currentOperation   = currentState.currentOperation
-          enqueuedOperations = currentState.clientOperations.values.toList.flatten
+//          currentOperation   = currentState.currentOperation
+//          enqueuedOperations = currentState.clientOperations.values.toList.flatten
           operations         = EventXOps.completedPutsByObjectId(events =events,objectId = uphs.objectId)
           maybeOperation     = operations.find(_.operationId == uphs.operationId)
           maybeOperationBySerial = operations.find(_.serialNumber == uphs.serialNumber)
@@ -343,15 +343,15 @@ object UploadControllerV2 {
                     replicaNodes      = uphs.replicaNodes.map(nodexs)
                     replicaNodesQueue = uphs.replicaNodes.map( rn=> rn -> currentState.nodeQueue(rn)).toMap
 //                    ADD TO QUEUE
-                    _ <- ctx.state.update{s=>
-                      val newQueueMap = Map(
-                        uphs.pivotReplicaNode -> List(operation),
-                      )
-                      val rnQueuesMap = uphs.replicaNodes.map(rn=> Map(rn->  List(operation) )).foldLeft(Map.empty[String,List[QueueOperation]]  )(_ |+| _)
-                      val nodesQueue = newQueueMap |+| rnQueuesMap
-
-                      s.copy(nodeQueue = nodesQueue)
-                    }
+//                    _ <- ctx.state.update{s=>
+//                      val newQueueMap = Map(
+//                        uphs.pivotReplicaNode -> List(operation),
+//                      )
+//                      val rnQueuesMap = uphs.replicaNodes.map(rn=> Map(rn->  List(operation) )).foldLeft(Map.empty[String,List[QueueOperation]]  )(_ |+| _)
+//                      val nodesQueue = newQueueMap |+| rnQueuesMap
+//
+//                      s.copy(nodeQueue = nodesQueue)
+//                    }
                     res                <- Ok()
                   } yield res
                 }

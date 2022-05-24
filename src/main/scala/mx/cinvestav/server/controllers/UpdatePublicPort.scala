@@ -3,7 +3,7 @@ package mx.cinvestav.server.controllers
 import cats.effect._
 import mx.cinvestav.Declarations.NodeContext
 import mx.cinvestav.commons.events.AddedNode
-import mx.cinvestav.commons.events.ServiceReplicator.AddedService
+import mx.cinvestav.commons.events.ServiceReplicator.AddedStorageNode
 import mx.cinvestav.events.Events
 import mx.cinvestav.events.Events.UpdatedNetworkCfg
 

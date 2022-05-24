@@ -1,13 +1,15 @@
+import cats.implicits._
 import breeze.linalg._
 import breeze.numerics._
 import fs2.concurrent.SignallingRef
 import mx.cinvestav.Declarations.NodeContext
 import mx.cinvestav.Main
-import mx.cinvestav.commons.events.{Push, Replicated}
+import mx.cinvestav.commons.events.{GetCompleted, Push, PutCompleted, Replicated}
 import mx.cinvestav.events.Events.GetInProgress
 import mx.cinvestav.replication.DataReplication
 import org.http4s.blaze.client.{BlazeClient, BlazeClientBuilder}
 
+import scala.collection.immutable.ListMap
 import scala.concurrent.ExecutionContext.global
 import scala.concurrent.duration.Duration
 //import breeze.linalg.di
@@ -91,8 +93,6 @@ class EventSpect extends munit .CatsEffectSuite {
     nodeId="lb-0",
     port=4000,
     totalStorageCapacity = 1000,
-    cacheSize = 10,
-    cachePolicy = "LRU",
     timestamp = 0L,
     serviceTimeNanos = 0L
   )
@@ -140,6 +140,32 @@ class EventSpect extends munit .CatsEffectSuite {
     }
   }
 //  P(FAi) =
+  test("K"){
+    val es = List(
+      AddedNode.empty.copy(addedNodeId = "sn-0"),
+      AddedNode.empty.copy(addedNodeId = "sn-1"),
+      AddedNode.empty.copy(addedNodeId = "sn-2"),
+//    ________________________________________________________________
+      PutCompleted.empty.copy(nodeId = "sn-0",objectId="f0",monotonicTimestamp = 1),
+      PutCompleted.empty.copy(nodeId = "sn-1",objectId="f0",monotonicTimestamp = 1),
+      PutCompleted.empty.copy(nodeId = "sn-1",objectId="f1",monotonicTimestamp = 1),
+      PutCompleted.empty.copy(nodeId = "sn-2",objectId="f1"),
+//    ________________________________________________________________
+      GetCompleted.empty.copy(nodeId = "sn-0",objectId = "f0",monotonicTimestamp = 1),
+      GetCompleted.empty.copy(nodeId = "sn-0",objectId = "f0",monotonicTimestamp = 1),
+      GetCompleted.empty.copy(nodeId = "sn-0",objectId = "f0",monotonicTimestamp = 1),
+//    ________________________________________________________________
+      GetCompleted.empty.copy(nodeId = "sn-1",objectId = "f0",monotonicTimestamp = 1),
+      GetCompleted.empty.copy(nodeId = "sn-1",objectId = "f1",monotonicTimestamp = 1),
+//    ________________________________________________________________
+      GetCompleted.empty.copy(nodeId = "sn-2",objectId = "f0",monotonicTimestamp = 1),
+      GetCompleted.empty.copy(nodeId = "sn-2",objectId = "f1",monotonicTimestamp = 1),
+    ).asInstanceOf[List[EventX]]
+//    val gcbn = Events.getHitCounterByNodeV2(events = es)
+
+    val xs = Events.generateReplicaUtilizationMap(events=es)
+    println(xs)
+  }
   test("Main"){
     for {
       (client,finalizer)          <- BlazeClientBuilder[IO](global).resource.allocated
