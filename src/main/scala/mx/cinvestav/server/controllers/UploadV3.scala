@@ -24,7 +24,7 @@ object UploadV3 {
     val replicaNodes         = (replicaNodesInSchema ++ replicaNodesInWhere).distinct
 //    Check if all replicanodes exists
     val replicaNodes0        = replicaNodes.map(n=>nodexs.get(n)).filter(_.isDefined).map(_.get)
-    val _replicaNodes0        = replicaNodes.filterNot(n=> nodexs.isDefinedAt(n))
+    val _replicaNodes0       = replicaNodes.filterNot(n=> nodexs.isDefinedAt(n))
 
     val program = replicaNodes.traverse{ nId =>
       val rs      = payload.data(nId)
@@ -98,8 +98,11 @@ object UploadV3 {
     def inner(availableNodes:Map[String,NodeX] = Map.empty[String,NodeX],ns:Map[String,NodeX]= Map.empty[String,NodeX]):Map[String,NodeX] ={
       val x = replicaNodes0.map{ n =>
         val rp            = payload.data(n.nodeId)
-        val whatTotalSize = rp.what.map(_.metadata.getOrElse("OBJECT_SIZE","0").toLong).sum
-        val y = rp.what.traverse{ w=>
+        val what          = rp.what
+        val whatTotalSize = what.map(_.metadata.getOrElse("OBJECT_SIZE","0").toLong).sum
+//        First case - Where is empty and Replication factor is not defined
+
+        val y = what.traverse{ w=>
 
           for {
             _                      <- IO.unit
@@ -111,29 +114,48 @@ object UploadV3 {
 
             newReplicaNodes        <- maybeRf match {
               case Some(rf) =>
-                for {
-                  _               <- IO.unit
-                  diffRf          = rf - _replicaNodes.length
-                  _               <- ctx.logger.debug(s"REPLICATION_FACTOR_DIFF $diffRf")
-                  res             <- if(diffRf == 0 || diffRf < 0) _replicaNodes.pure[IO]
-                  else {
-                    val _diffRf = rf - nodexs.size
-//                    if(balancing && )
-                    if(ctx.config.elasticity && _diffRf >0 ){
-                      val nrs        = (0 until _diffRf).map(_=>NodeReplicationSchema.empty(id = "")).toList
-                      val responseIO = nrs.traverse{n => ctx.config.systemReplication.createNode(nrs = n)}
-                      for {
-                        _        <- IO.unit
-                        response <- responseIO
-                        nodes    = response.map(_.nodeId) ++ _replicaNodes
-                      } yield nodes
-                    } else {
-                      
-                      _replicaNodes.pure[IO]
-                    }
-                  }
-                  //                      else IO.pure(_replicaNodes))
-                } yield res
+                  val  rfDiff    = rf - _replicaNodes.length
+                  val realRfDiff = rf - nodexs.size
+                 if(rf == _replicaNodes.length) {
+                   _replicaNodes.pure[IO]
+                 }
+//               RFDIFF > 0 means that there are not sufficient declared nodes in where definition.
+                 else if (rfDiff > 0){
+                   for {
+                     _ <- IO.unit
+                     _ <- if(balancing && !elasticity && realRfDiff <0) for {
+                       _ <- ctx.logger.debug(s"BALANCING ^ !ELASTICITY ^ REAL_RF_DIFF $realRfDiff")
+                     } yield ()
+                     else {
+                       IO.unit
+                     }
+                   } yield ()
+                 }
+                 else {
+                   for {
+                     _               <- IO.unit
+                     diffRf          = rf - _replicaNodes.length
+                     _               <- ctx.logger.debug(s"REPLICATION_FACTOR_DIFF $diffRf")
+                     res             <- if(diffRf == 0 || diffRf < 0) _replicaNodes.pure[IO]
+                     else {
+                       val _diffRf = rf - nodexs.size
+                       //                    if(balancing && )
+                       if(ctx.config.elasticity && _diffRf >0 ){
+                         val nrs        = (0 until _diffRf).map(_=>NodeReplicationSchema.empty(id = "")).toList
+                         val responseIO = nrs.traverse{n => ctx.config.systemReplication.createNode(nrs = n)}
+                         for {
+                           _        <- IO.unit
+                           response <- responseIO
+                           nodes    = response.map(_.nodeId) ++ _replicaNodes
+                         } yield nodes
+                       } else {
+
+                         _replicaNodes.pure[IO]
+                       }
+                     }
+                     //                      else IO.pure(_replicaNodes))
+                   } yield res
+                 }
               case None => _replicaNodes.pure[IO]
             }
 //            _replicaNodexs         = _replicaNodes.map{nId=>
@@ -144,12 +166,8 @@ object UploadV3 {
 
         }
       }
-//      if(availableNodes.isEmpty) {
         Map.empty[String,NodeX]
-//      }
-//      else {
-//        Map.empty[String,NodeX]
-//      }
+
     }
 
 //    All replica nodes defined in rs exists
