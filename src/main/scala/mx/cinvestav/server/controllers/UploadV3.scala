@@ -116,18 +116,26 @@ object UploadV3 {
               case Some(rf) =>
                   val  rfDiff    = rf - _replicaNodes.length
                   val realRfDiff = rf - nodexs.size
-                 if(rf == _replicaNodes.length) {
-                   _replicaNodes.pure[IO]
-                 }
+//  ____________________________________________________________________________________________________________________
+                 if(rf == _replicaNodes.length) _replicaNodes.pure[IO]
 //               RFDIFF > 0 means that there are not sufficient declared nodes in where definition.
                  else if (rfDiff > 0){
                    for {
                      _ <- IO.unit
-                     _ <- if(balancing && !elasticity && realRfDiff <0) for {
+//                   BALANCE: ACTIVE , ELASTICITY: FALSE , AR > RF
+                     selected  <- if(balancing && !elasticity && realRfDiff <0) for {
                        _ <- ctx.logger.debug(s"BALANCING ^ !ELASTICITY ^ REAL_RF_DIFF $realRfDiff")
-                     } yield ()
+                       nodes = Nil
+                     } yield nodes
+//                   BALANCE: ACTIVE , ELASTICITY: FALSE , AR < RF
+                     else if(balancing && !elasticity && realRfDiff > 0){
+                       for {
+                         _     <- ctx.logger.debug(s"BALANCING ^ !ELASTICITY ^ REAL_RF_DIFF $realRfDiff")
+                         nodes = Nil
+                       } yield nodes
+                     }
                      else {
-                       IO.unit
+                       IO.pure(Nil)
                      }
                    } yield ()
                  }
