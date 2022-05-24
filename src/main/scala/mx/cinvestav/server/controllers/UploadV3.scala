@@ -1,5 +1,6 @@
 package mx.cinvestav.server.controllers
 
+import cats.data.NonEmptyList
 import cats.implicits._
 import cats.effect._
 import mx.cinvestav.Declarations.{Download, NodeContext, Upload}
@@ -12,13 +13,13 @@ import io.circe.syntax._
 import io.circe.generic.auto._
 import mx.cinvestav.Declarations
 import mx.cinvestav.events.Events
-import mx.cinvestav.commons.events.EventXOps
+import mx.cinvestav.commons.events.{EventX, EventXOps}
 import org.typelevel.ci.CIString
 
 
 object UploadV3 {
 
-  def  genQueue(payload:ReplicationSchema,nodexs:Map[String,NodeX],clientId:String="")(implicit ctx:NodeContext)= {
+  def  genQueue(events:List[EventX],payload:ReplicationSchema,nodexs:Map[String,NodeX],clientId:String="")(implicit ctx:NodeContext)= {
     val replicaNodesInSchema = payload.data.keys.toList
     val replicaNodesInWhere  = payload.data.values.toList.flatMap(_.where)
     val replicaNodes         = (replicaNodesInSchema ++ replicaNodesInWhere).distinct
@@ -95,7 +96,7 @@ object UploadV3 {
       operations
     }.map(_.toMap)
 
-    def inner(availableNodes:Map[String,NodeX] = Map.empty[String,NodeX],ns:Map[String,NodeX]= Map.empty[String,NodeX]):Map[String,NodeX] ={
+    def inner(availableNodes:Map[String,NodeX] = Map.empty[String,NodeX]):Map[String,NodeX] ={
       val x = replicaNodes0.map{ n =>
         val rp            = payload.data(n.nodeId)
         val what          = rp.what
@@ -107,30 +108,40 @@ object UploadV3 {
           for {
             _                      <- IO.unit
             maybeRf                = w.metadata.get("REPLICATION_FACTOR").flatMap(_.toIntOption)
+            objectSize             = w.metadata.get("OBJECT_SIZE").flatMap(_.toLongOption).getOrElse(0L)
             forceCreate            = w.metadata.get("FORCE_NODE_CREATION").flatMap(_.toBooleanOption).getOrElse(false)
             balancing              = w.metadata.get("LOAD_BALANCE").flatMap(_.toBooleanOption).getOrElse(true)
             elasticity             = w.metadata.get("ELASTICITY").flatMap(_.toBooleanOption).getOrElse(ctx.config.elasticity)
             _replicaNodes          = rp.where ++ List(n.nodeId)
+//            _replicaNodeXs         = _replicaNodes.map(nId=>nodexs(nId) )
 
             newReplicaNodes        <- maybeRf match {
               case Some(rf) =>
-                  val  rfDiff    = rf - _replicaNodes.length
-                  val realRfDiff = rf - nodexs.size
+                  val  warRFDiff    = rf - _replicaNodes.length
+                  val arRFDiff = rf - nodexs.size
 //  ____________________________________________________________________________________________________________________
                  if(rf == _replicaNodes.length) _replicaNodes.pure[IO]
 //               RFDIFF > 0 means that there are not sufficient declared nodes in where definition.
-                 else if (rfDiff > 0){
+                 else if (warRFDiff > 0){
                    for {
                      _ <- IO.unit
 //                   BALANCE: ACTIVE , ELASTICITY: FALSE , AR > RF
-                     selected  <- if(balancing && !elasticity && realRfDiff <0) for {
-                       _ <- ctx.logger.debug(s"BALANCING ^ !ELASTICITY ^ REAL_RF_DIFF $realRfDiff")
+                     selected  <- if(balancing && !elasticity && arRFDiff <0) for {
+                       _       <- ctx.logger.debug(s"BALANCING ^ !ELASTICITY ^ REAL_RF_DIFF $arRFDiff")
+                       war     = _replicaNodes.length
+                       _nodes  = if(war == rf) _replicaNodes
+                       else if (war < rf) {
+                         val _ar =
+                           UploadControllerV2.balance(events = events)(objectSize = objectSize ,rf = warRFDiff,nodes = _ar).getOrElse(Nil)
+                       }
+                       else _replicaNodes
+//                       nodes   = UploadControllerV2.balance(events = events )(objectSize = objectSize,nodes =  _nodes,rf=warRFDiff)
                        nodes = Nil
                      } yield nodes
 //                   BALANCE: ACTIVE , ELASTICITY: FALSE , AR < RF
-                     else if(balancing && !elasticity && realRfDiff > 0){
+                     else if(balancing && !elasticity && arRFDiff > 0){
                        for {
-                         _     <- ctx.logger.debug(s"BALANCING ^ !ELASTICITY ^ REAL_RF_DIFF $realRfDiff")
+                         _     <- ctx.logger.debug(s"BALANCING ^ !ELASTICITY ^ REAL_RF_DIFF $arRFDiff")
                          nodes = Nil
                        } yield nodes
                      }
@@ -166,10 +177,6 @@ object UploadV3 {
                  }
               case None => _replicaNodes.pure[IO]
             }
-//            _replicaNodexs         = _replicaNodes.map{nId=>
-//              val n = nodexs(nId )
-//              (n,n.calculateUF(objectSize = whatTotalSize))
-//            }.filter(_._2<=1)
           } yield ()
 
         }
@@ -233,7 +240,7 @@ object UploadV3 {
         _            <- nrss.traverse{ nrs=>
           ctx.config.systemReplication.createNode(nrs =nrs)
         }.start
-        x <- genQueue(payload = payload,nodexs=nodexs)
+        x <- genQueue(events = events, payload = payload,nodexs=nodexs)
 //        queueX               <- ???
 //        _            <- ctx.state.update{s=>s.copy(nodeQueue = s.nodeQueue |+| queueX)}
         response     <- Ok()

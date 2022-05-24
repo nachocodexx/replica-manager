@@ -45,9 +45,10 @@ object UploadControllerV2 {
 
   }
 
-  def balance(events: List[EventX])(objectSize:Long,nodes:NonEmptyList[NodeX],rf:Int)(implicit ctx:NodeContext) = {
+  def balance(events: List[EventX])(objectSize:Long,nodes:NonEmptyList[NodeX],rf:Int,filterFn: NodeX  => Boolean = _=>true)(implicit ctx:NodeContext) = {
     val nodeIds            = nodes.map(_.nodeId)
-    val filteredNodes      = nodes.filter(_.availableStorageCapacity >= objectSize)
+//    val filteredNodes      = nodes.filter(_.availableStorageCapacity >= objectSize)
+    val filteredNodes      = nodes.filter(filterFn)
     val filteredNodeIds    = filteredNodes.map(_.nodeId)
     val filteredUfs        = filteredNodes.map(_.ufs)
 
