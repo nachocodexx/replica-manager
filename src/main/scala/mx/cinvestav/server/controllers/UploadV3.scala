@@ -1,6 +1,6 @@
 package mx.cinvestav.server.controllers
 
-import cats.data.NonEmptyList
+import cats.data.{IRWST, NonEmptyList}
 import cats.implicits._
 import cats.effect._
 import mx.cinvestav.Declarations.{Download, NodeContext, Upload}
@@ -15,6 +15,7 @@ import mx.cinvestav.Declarations
 import mx.cinvestav.events.Events
 import mx.cinvestav.commons.events.{EventX, EventXOps}
 import org.typelevel.ci.CIString
+import mx.cinvestav.commons.utils
 
 
 object UploadV3 {
@@ -36,7 +37,6 @@ object UploadV3 {
             maybeRf                = w.metadata.get("REPLICATION_FACTOR").flatMap(_.toIntOption)
             forceCreate            = w.metadata.get("FORCE_NODE_CREATION").flatMap(_.toBooleanOption).getOrElse(false)
             balancing              = w.metadata.get("LOAD_BALANCE").flatMap(_.toBooleanOption).getOrElse(true)
-            //                _                      <- ctx.logger.debug(s"REPLICATION_FACTOR $maybeRf")
             _replicaNodes          = rs.where ++ List(nId)
             _replicaNodeXsfiltered = _replicaNodes.map(rNId=>nodexs.get(rNId)).filter(_.isDefined).map(_.get)
             //                  .filter(_.ufs.diskUF)
@@ -70,7 +70,7 @@ object UploadV3 {
             }
             res            <- newReplicaNodes.zipWithIndex.traverse{
               case(rNId,index2) =>
-                val operationId = mx.cinvestav.commons.utils.generateNodeId(prefix = "op",len=10,autoId=true,suffix="")
+                val operationId = mx.cinvestav.commons.utils.generateNodeId(prefix = "op",len=10,autoId=true)
                 for {
                   arrivalTime0 <- IO.monotonic.map(_.toNanos)
                   serialNumber <- ctx.state.get.map(_.lastSerialNumber+index2)
@@ -96,13 +96,20 @@ object UploadV3 {
       operations
     }.map(_.toMap)
 
-    def inner(availableNodes:Map[String,NodeX] = Map.empty[String,NodeX]):Map[String,NodeX] ={
+    def inner():Map[String,NodeX] ={
       val x = replicaNodes0.map{ n =>
-        val rp            = payload.data(n.nodeId)
-        val what          = rp.what
-        val whatTotalSize = what.map(_.metadata.getOrElse("OBJECT_SIZE","0").toLong).sum
+        val rp             = payload.data(n.nodeId)
+//      pivot and the where nodes
+        val where   = rp.where ++ List(n.nodeId)
+        val wAR     = where.length
+//
+        val AR = nodexs.filterNot{
+          case (nId,n)=>
+            where.contains(nId)
+        }
+        val what           = rp.what
+        val whatTotalSize  = what.map(_.metadata.getOrElse("OBJECT_SIZE","0").toLong).sum
 //        First case - Where is empty and Replication factor is not defined
-
         val y = what.traverse{ w=>
 
           for {
@@ -112,70 +119,30 @@ object UploadV3 {
             forceCreate            = w.metadata.get("FORCE_NODE_CREATION").flatMap(_.toBooleanOption).getOrElse(false)
             balancing              = w.metadata.get("LOAD_BALANCE").flatMap(_.toBooleanOption).getOrElse(true)
             elasticity             = w.metadata.get("ELASTICITY").flatMap(_.toBooleanOption).getOrElse(ctx.config.elasticity)
-            _replicaNodes          = rp.where ++ List(n.nodeId)
-//            _replicaNodeXs         = _replicaNodes.map(nId=>nodexs(nId) )
 
             newReplicaNodes        <- maybeRf match {
               case Some(rf) =>
-                  val  warRFDiff    = rf - _replicaNodes.length
-                  val arRFDiff = rf - nodexs.size
+                  val  warRFDiff = rf - where.length
+                  val arRFDiff   = rf - nodexs.size
 //  ____________________________________________________________________________________________________________________
-                 if(rf == _replicaNodes.length) _replicaNodes.pure[IO]
-//               RFDIFF > 0 means that there are not sufficient declared nodes in where definition.
-                 else if (warRFDiff > 0){
-                   for {
-                     _ <- IO.unit
-//                   BALANCE: ACTIVE , ELASTICITY: FALSE , AR > RF
-                     selected  <- if(balancing && !elasticity && arRFDiff <0) for {
-                       _       <- ctx.logger.debug(s"BALANCING ^ !ELASTICITY ^ REAL_RF_DIFF $arRFDiff")
-                       war     = _replicaNodes.length
-                       _nodes  = if(war == rf) _replicaNodes
-                       else if (war < rf) {
-                         val _ar =
-                           UploadControllerV2.balance(events = events)(objectSize = objectSize ,rf = warRFDiff,nodes = _ar).getOrElse(Nil)
-                       }
-                       else _replicaNodes
-//                       nodes   = UploadControllerV2.balance(events = events )(objectSize = objectSize,nodes =  _nodes,rf=warRFDiff)
-                       nodes = Nil
+//               RF == len(Where)
+                 if(rf == wAR) where.pure[IO]
+//               RFDIFF > 0 means that there are not sufficient declared nodes in where clause.
+                 else if (rf> wAR){
+                   if(balancing && AR.size > rf ) {
+                        Nil.pure[IO]
+                   } else if (elasticity && AR.size < rf){
+                     for {
+                       _           <- ctx.logger.debug(s"RF > wAR -> Create $warRFDiff nodes")
+                       newNodesIds = (0 until warRFDiff).map(_=>utils.generateStorageNodeId(autoId=true)).toList
+                       nrs         = newNodesIds.map(id=>NodeReplicationSchema.empty(id = id))
+                       response    <-  nrs.traverse{n => ctx.config.systemReplication.createNode(nrs = n)}
+                       nodes       = response.map(_.nodeId) ++ where
                      } yield nodes
-//                   BALANCE: ACTIVE , ELASTICITY: FALSE , AR < RF
-                     else if(balancing && !elasticity && arRFDiff > 0){
-                       for {
-                         _     <- ctx.logger.debug(s"BALANCING ^ !ELASTICITY ^ REAL_RF_DIFF $arRFDiff")
-                         nodes = Nil
-                       } yield nodes
-                     }
-                     else {
-                       IO.pure(Nil)
-                     }
-                   } yield ()
+                   } else Nil.pure[IO]
                  }
-                 else {
-                   for {
-                     _               <- IO.unit
-                     diffRf          = rf - _replicaNodes.length
-                     _               <- ctx.logger.debug(s"REPLICATION_FACTOR_DIFF $diffRf")
-                     res             <- if(diffRf == 0 || diffRf < 0) _replicaNodes.pure[IO]
-                     else {
-                       val _diffRf = rf - nodexs.size
-                       //                    if(balancing && )
-                       if(ctx.config.elasticity && _diffRf >0 ){
-                         val nrs        = (0 until _diffRf).map(_=>NodeReplicationSchema.empty(id = "")).toList
-                         val responseIO = nrs.traverse{n => ctx.config.systemReplication.createNode(nrs = n)}
-                         for {
-                           _        <- IO.unit
-                           response <- responseIO
-                           nodes    = response.map(_.nodeId) ++ _replicaNodes
-                         } yield nodes
-                       } else {
-
-                         _replicaNodes.pure[IO]
-                       }
-                     }
-                     //                      else IO.pure(_replicaNodes))
-                   } yield res
-                 }
-              case None => _replicaNodes.pure[IO]
+                 else where.pure[IO]
+              case None => where.pure[IO]
             }
           } yield ()
 
@@ -189,8 +156,8 @@ object UploadV3 {
     if(_replicaNodes0.isEmpty) {
       for {
          _              <- IO.unit
-         availableNodes = replicaNodes0.map(n=>n.nodeId -> n).toMap
-         x              =  inner( availableNodes = availableNodes )
+//         availableNodes = replicaNodes0.map(n=>n.nodeId -> n).toMap
+         x              =  inner()
       } yield ()
     } else {
       for{
