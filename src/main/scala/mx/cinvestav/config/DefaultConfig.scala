@@ -122,4 +122,5 @@ case class DefaultConfig(
                           replicationTransferType:String,
                           nSemaphore:Int = 1,
                           defaultImpactFactor:Double = 0.0,
+                          elasticityTime:String
                         )
