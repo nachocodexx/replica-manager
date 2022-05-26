@@ -191,7 +191,7 @@ class EventSpect extends munit .CatsEffectSuite {
 //    println(cache0Id.hashCode,cache1Id.hashCode)
   }
 
-  test("K") {
+  test("K1") {
     val xs = List(1,2,3,4,5,6)
     val ys = xs.scanLeft(0.0){
       case (a,b) =>

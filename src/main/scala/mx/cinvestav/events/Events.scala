@@ -222,13 +222,30 @@ object Events {
       case _             => false
     }
   }
+  def onlyGetAndPut(events:List[EventX]): List[EventX] = {
+    events.filter{
+      case _:Get | _:Put => true
+      case _             => false
+    }
+  }
 
   def getCompletedAndPutCompletedByNode(events:List[EventX]): Map[String, List[EventX]] = {
     val getsAndPuts:List[EventX] = onlyGetCompletedAndPuCompleted(events=events)
     getsAndPuts.groupBy(_.nodeId)
   }
+  def getAndPutByNode(events:List[EventX]): Map[String, List[EventX]] = {
+    val getsAndPuts:List[EventX] = onlyGetAndPut(events=events)
+    getsAndPuts.groupBy(_.nodeId)
+  }
 
 
+  def getLastSerialNumberByNode(events:List[EventX],nodeId:String) = {
+    val xs = getAndPutByNode(events = events)
+    xs.get(nodeId) match {
+      case Some(value) => value.length
+      case None => 0
+    }
+  }
   def getAvgServiceTimeByNode(events:List[EventX]): Map[String, Double] = {
     getCompletedAndPutCompletedByNode(events=events)
       .map{

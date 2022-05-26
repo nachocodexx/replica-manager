@@ -37,10 +37,10 @@ import java.util.UUID
 import scala.concurrent.ExecutionContext.global
 //
 
-class HttpServer(sDownload:Semaphore[IO])(implicit ctx:NodeContext) {
+class HttpServer(s:Semaphore[IO])(implicit ctx:NodeContext) {
   def apiBaseRouteName = s"/api/v${ctx.config.apiVersion}"
 
-  def basicOpsRoutes = AuthMiddlewareX(ctx)(DownloadControllerV2(sDownload) <+> UploadControllerV2(sDownload))
+  def basicOpsRoutes = AuthMiddlewareX(ctx)(DownloadControllerV2(s) <+> UploadControllerV2(s))
 
   def defaultRoutes =
    CompletedUploadController() <+>
@@ -55,7 +55,7 @@ class HttpServer(sDownload:Semaphore[IO])(implicit ctx:NodeContext) {
     Router[IO](
       s"$apiBaseRouteName"-> basicOpsRoutes,
       s"$apiBaseRouteName" -> defaultRoutes,
-      s"/api/v3/" -> UploadV3()
+      s"/api/v3/" -> UploadV3(s = s)
 //      "/api/v6/update" -> UpdateConfig(),
 //      "/api/v6/add-node" -> AddNode(),
 //      "/api/v6/stats" -> CORS(StatsController()),

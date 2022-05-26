@@ -3,11 +3,12 @@ package mx.cinvestav.server.controllers
 import cats.data.NonEmptyList
 import cats.implicits._
 import cats.effect._
-import mx.cinvestav.Declarations.{Download, NodeContext, Upload}
+import cats.effect.std.Semaphore
+import mx.cinvestav.Declarations.{Download, NodeContext, Operation, Upload}
 import org.http4s._
 import org.http4s.implicits._
 import org.http4s.dsl.io._
-import mx.cinvestav.commons.types.{Balance, NodeBalance, NodeReplicationSchema, NodeX, ReplicationProcess, ReplicationSchema, What}
+import mx.cinvestav.commons.types.{NodeBalance, NodeReplicationSchema, NodeX, ReplicationProcess, ReplicationSchema, UploadBalance, What}
 import org.http4s.circe.CirceEntityDecoder._
 import org.http4s.circe.CirceEntityEncoder._
 import io.circe.syntax._
@@ -197,27 +198,78 @@ object UploadV3 {
   }
 
 
-  def apply()(implicit ctx:NodeContext) = HttpRoutes.of[IO]{
+  def apply(s:Semaphore[IO])(implicit ctx:NodeContext) = HttpRoutes.of[IO]{
 
-    case req@POST -> Root / "upload" / "balance" => for {
+    case req@GET -> Root / "upload" =>
+      val app = for {
 //    _____________________________________________________________________
+      _                  <- s.acquire
       arrivalTime        <- IO.monotonic.map(_.toNanos)
       headers            = req.headers
-      objectId           = headers.get(CIString("Object-Id")).map(_.head.value).getOrElse("OBJECT_SIZE")
-      objectSize         = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(1)
+      objectId           = headers.get(CIString("Object-Id")).map(_.head.value).getOrElse("OBJECT_ID")
+      operationId        = headers.get(CIString("Operation-Id")).map(_.head.value).getOrElse("OPERATION_ID")
+      clientId           = headers.get(CIString("Client-Id")).map(_.head.value).getOrElse("CLIENT_ID")
+      objectSize         = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(1L)
       rf                 = headers.get(CIString("Replication-Factor")).flatMap(_.head.value.toIntOption).getOrElse(1)
+//    __________________________________________________________________________________________________________________
       currentState       <- ctx.state.get
       nodesQueue         = currentState.nodeQueue
       rawEvents          = currentState.events
       events             = Events.orderAndFilterEventsMonotonicV2(events = rawEvents)
-      avgServiceTimes     = Events.getAvgServiceTimeByNode(events = events)
+      avgServiceTimes    = Events.getAvgServiceTimeByNode(events = events)
       nodexs             = EventXOps.getAllNodeXs(events = events).map(n=>n.nodeId -> n).toMap
       nx                 = NonEmptyList.fromListUnsafe(nodexs.values.toList)
-      maybeSelectedNodes = UploadControllerV2.balance(events)(objectSize=objectSize,nodes = nx,rf =rf,filterFn = x=>x.availableStorageCapacity > objectSize )
+      maybeSelectedNodes = UploadControllerV2.balance(events)(
+        objectSize = objectSize,
+        nodes      = nx,
+        rf         =rf,
+        filterFn   = x=>x.availableStorageCapacity > objectSize
+      )
       serviceTime        <- IO.monotonic.map(_.toNanos - arrivalTime)
-      res           <- maybeSelectedNodes match {
+//    __________________________________________________________________________________________________________________
+      _ <- ctx.logger.debug(s"SELECTED_NODES $maybeSelectedNodes")
+      response           <- maybeSelectedNodes match {
         case Some(selectedNodes) =>
-          Ok()
+          val nodes = selectedNodes.map{ sn=>
+            NodeBalance(operationId="",id = sn.nodeId,queuePosition =0 ,meanWaitingTime = 0)
+          }.map{ x=>
+            val queue           = nodesQueue.getOrElse(x.id,Nil)
+            val avgst           = avgServiceTimes.getOrElse(x.id,0.0)
+            val wt              = queue.zipWithIndex.scanLeft(0.0){
+                case (a,b)=>
+                  a+(b._2*avgst)
+              }
+            val meanWaitingTime = wt(queue.length)
+            val opId            = utils.generateNodeId(prefix = "op",autoId = true)
+            val serialNumber    = Events.getLastSerialNumberByNode(events = events,nodeId = x.id)
+            val op              = Upload(
+              operationId  = opId,
+              serialNumber = serialNumber,
+              arrivalTime  = arrivalTime,
+              objectId     = objectId,
+              objectSize   = objectSize,
+              clientId     = clientId,
+              nodeId       = x.id,
+              metadata     = Map.empty[String,String]
+            )
+            (x.copy(queuePosition =queue.length, meanWaitingTime = meanWaitingTime ),  op.nodeId-> op )
+          }
+          for {
+            _    <- ctx.state.update{
+                s=>
+                  val xs = nodes.map(_._2).toMap.map{
+                    case (nId,x) => nId-> (x::Nil)
+                  }.toMap
+                  s.copy(nodeQueue = s.nodeQueue |+| xs  )
+            }
+            res  <- Ok(
+                 UploadBalance(
+                   operationId  = operationId,
+                   nodes        = nodes.map(_._1),
+                   serviceTime  = serviceTime
+                 )
+            )
+          } yield res
         case None =>
           val ids  = (0 until rf).toList.map(i => utils.generateStorageNodeId(autoId = true))
           val nrss = ids.map(id => NodeReplicationSchema.empty(id = id))
@@ -225,31 +277,54 @@ object UploadV3 {
             _    <- IO.unit
             nres <- if(ctx.config.elasticityTime == "DEFERRED") ids.pure[IO] else nrss
               .traverse(nrs => ctx.config.systemReplication.createNode(nrs)).map(_.map(_.nodeId))
-            nodes = nres.map(nr => NodeBalance(id = nr, queuePosition = 0, meanWaitingTime = 0) ).map{x=>
-              val queue = nodesQueue.getOrElse(x.id,Nil)
-              val avgst = avgServiceTimes.getOrElse(x.id,0.0)
-              val wt    = queue.zipWithIndex.scanLeft(0.0){
-                  case (a,b)=>
-                    a+(b._2*avgst)
-                }
-                val meanWaitingTime = 0
-                x.copy(queuePosition =queue.length, meanWaitingTime = meanWaitingTime )
 
-              }
+            nodes = nres.map(nr => NodeBalance(operationId="",id = nr, queuePosition = 0, meanWaitingTime = 0.0) ).map{x=>
+                val queue = nodesQueue.getOrElse(x.id,Nil)
+                val avgst = avgServiceTimes.getOrElse(x.id,0.0)
+                val wt    = queue.zipWithIndex.scanLeft(0.0){
+                    case (a,b)=>
+                      a+(b._2*avgst)
+                  }
+                val meanWaitingTime = wt(queue.length)
+                val opId            = utils.generateNodeId(prefix = "op",autoId = true)
+                val serialNumber    = Events.getLastSerialNumberByNode(events = events,nodeId = x.id)
+                val op              = Upload(
+                                              operationId  = opId,
+                                              serialNumber = serialNumber,
+                                              arrivalTime  = arrivalTime,
+                                              objectId     = objectId,
+                                              objectSize   = objectSize,
+                                              clientId     = clientId,
+                                              nodeId       = x.id,
+                                              metadata     = Map.empty[String,String]
+                                              )
+                (x.copy(queuePosition =queue.length, meanWaitingTime = meanWaitingTime ),  op.nodeId-> op )
+//                x.copy(queuePosition =queue.length, meanWaitingTime = meanWaitingTime )
+            }
 
-            _    <- Ok(
-              Balance(
-                nodes       = nodes,
+            _ <- ctx.state.update{
+              s=>
+                val xs = nodes.map(_._2).toMap.map{
+                  case (nId,x) => nId-> (x::Nil)
+                }.toMap
+                s.copy(nodeQueue = s.nodeQueue |+| xs  )
+            }
+            res    <- Ok(
+              UploadBalance(
+                operationId = operationId,
+                nodes       = nodes.map(_._1),
                 serviceTime = serviceTime
               ).asJson
             )
 
-          } yield ()
-//          ctx.config.systemReplication.createNode()
+          } yield res
       }
-      _             <- ctx.logger.info(s"BALANCE $objectId $objectSize ")
-      response <- Ok()
+      _             <- ctx.logger.info(s"BALANCE $objectId $objectSize $serviceTime")
+      _                  <- s.release
     } yield response
+      app.onError{ e=>
+        ctx.logger.error(e.getMessage)
+      }
     case req@POST -> Root / "upload" /"completed" => for{
       serviceTimeStart <- IO.monotonic.map(_.toNanos)
       currentState     <- ctx.state.get
