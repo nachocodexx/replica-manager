@@ -191,6 +191,14 @@ class EventSpect extends munit .CatsEffectSuite {
 //    println(cache0Id.hashCode,cache1Id.hashCode)
   }
 
+  test("K") {
+    val xs = List(1,2,3,4,5,6)
+    val ys = xs.scanLeft(0.0){
+      case (a,b) =>
+        a+b
+    }
+    println(ys)
+  }
   test("Monotonic"){
     val rawEvents2:List[EventX] = List(
       baseAddedNode.copy(timestamp = 0,serviceTimeNanos = 1),

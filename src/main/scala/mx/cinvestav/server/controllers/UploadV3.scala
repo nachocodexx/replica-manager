@@ -7,8 +7,9 @@ import mx.cinvestav.Declarations.{Download, NodeContext, Upload}
 import org.http4s._
 import org.http4s.implicits._
 import org.http4s.dsl.io._
-import mx.cinvestav.commons.types.{NodeReplicationSchema, NodeX, ReplicationProcess, ReplicationSchema, What}
+import mx.cinvestav.commons.types.{Balance, NodeBalance, NodeReplicationSchema, NodeX, ReplicationProcess, ReplicationSchema, What}
 import org.http4s.circe.CirceEntityDecoder._
+import org.http4s.circe.CirceEntityEncoder._
 import io.circe.syntax._
 import io.circe.generic.auto._
 import mx.cinvestav.Declarations
@@ -16,6 +17,7 @@ import mx.cinvestav.events.Events
 import mx.cinvestav.commons.events.{EventX, EventXOps}
 import org.typelevel.ci.CIString
 import mx.cinvestav.commons.utils
+//import mx.cinvestav.commons.utils
 
 
 object UploadV3 {
@@ -183,7 +185,6 @@ object UploadV3 {
     if(_replicaNodes0.isEmpty) {
       for {
          _              <- IO.unit
-//         availableNodes = replicaNodes0.map(n=>n.nodeId -> n).toMap
          x              <-  inner().map(xs=>xs.asRight[ErrorX])
       } yield x
     } else {
@@ -199,8 +200,54 @@ object UploadV3 {
   def apply()(implicit ctx:NodeContext) = HttpRoutes.of[IO]{
 
     case req@POST -> Root / "upload" / "balance" => for {
-      _        <- IO.unit
-      headers  = req.headers
+//    _____________________________________________________________________
+      arrivalTime        <- IO.monotonic.map(_.toNanos)
+      headers            = req.headers
+      objectId           = headers.get(CIString("Object-Id")).map(_.head.value).getOrElse("OBJECT_SIZE")
+      objectSize         = headers.get(CIString("Object-Size")).flatMap(_.head.value.toLongOption).getOrElse(1)
+      rf                 = headers.get(CIString("Replication-Factor")).flatMap(_.head.value.toIntOption).getOrElse(1)
+      currentState       <- ctx.state.get
+      nodesQueue         = currentState.nodeQueue
+      rawEvents          = currentState.events
+      events             = Events.orderAndFilterEventsMonotonicV2(events = rawEvents)
+      avgServiceTimes     = Events.getAvgServiceTimeByNode(events = events)
+      nodexs             = EventXOps.getAllNodeXs(events = events).map(n=>n.nodeId -> n).toMap
+      nx                 = NonEmptyList.fromListUnsafe(nodexs.values.toList)
+      maybeSelectedNodes = UploadControllerV2.balance(events)(objectSize=objectSize,nodes = nx,rf =rf,filterFn = x=>x.availableStorageCapacity > objectSize )
+      serviceTime        <- IO.monotonic.map(_.toNanos - arrivalTime)
+      res           <- maybeSelectedNodes match {
+        case Some(selectedNodes) =>
+          Ok()
+        case None =>
+          val ids  = (0 until rf).toList.map(i => utils.generateStorageNodeId(autoId = true))
+          val nrss = ids.map(id => NodeReplicationSchema.empty(id = id))
+          for {
+            _    <- IO.unit
+            nres <- if(ctx.config.elasticityTime == "DEFERRED") ids.pure[IO] else nrss
+              .traverse(nrs => ctx.config.systemReplication.createNode(nrs)).map(_.map(_.nodeId))
+            nodes = nres.map(nr => NodeBalance(id = nr, queuePosition = 0, meanWaitingTime = 0) ).map{x=>
+              val queue = nodesQueue.getOrElse(x.id,Nil)
+              val avgst = avgServiceTimes.getOrElse(x.id,0.0)
+              val wt    = queue.zipWithIndex.scanLeft(0.0){
+                  case (a,b)=>
+                    a+(b._2*avgst)
+                }
+                val meanWaitingTime = 0
+                x.copy(queuePosition =queue.length, meanWaitingTime = meanWaitingTime )
+
+              }
+
+            _    <- Ok(
+              Balance(
+                nodes       = nodes,
+                serviceTime = serviceTime
+              ).asJson
+            )
+
+          } yield ()
+//          ctx.config.systemReplication.createNode()
+      }
+      _             <- ctx.logger.info(s"BALANCE $objectId $objectSize ")
       response <- Ok()
     } yield response
     case req@POST -> Root / "upload" /"completed" => for{
@@ -211,6 +258,7 @@ object UploadV3 {
       objectIds        = headers.get(CIString("Object-Id")).map(_.map(_.value).toList).getOrElse(Nil).distinct
       queue            = currentState.nodeQueue
       nodeQueue        = queue.getOrElse(nodeId,Nil)
+
       newNodeQueue     = nodeQueue.filterNot (o => nodeQueue.contains(o.objectId) )
       completedOps     <- nodeQueue.filter(o => nodeQueue.contains(o.objectId) ).traverse {
         case d: Download => IO.unit

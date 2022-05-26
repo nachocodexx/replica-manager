@@ -216,11 +216,15 @@ object Events {
   }
 //
 
-  def getCompletedAndPutCompletedByNode(events:List[EventX]): Map[String, List[EventX]] = {
-    val getsAndPuts:List[EventX] = events.filter{
+  def onlyGetCompletedAndPuCompleted(events:List[EventX]): List[EventX] = {
+    events.filter{
       case _:GetCompleted | _:PutCompleted => true
       case _             => false
     }
+  }
+
+  def getCompletedAndPutCompletedByNode(events:List[EventX]): Map[String, List[EventX]] = {
+    val getsAndPuts:List[EventX] = onlyGetCompletedAndPuCompleted(events=events)
     getsAndPuts.groupBy(_.nodeId)
   }
 
@@ -232,7 +236,8 @@ object Events {
           nodeId -> avgServiceTime(operations)
       }
   }
-  def avgServiceTime(events:List[EventX]) = (events.map(_.serviceTimeNanos).sum.toDouble/1000000000)/events.length.toDouble
+  def avgServiceTime(events:List[EventX]) = if(events.isEmpty) 0.0 else (events.map(_.serviceTimeNanos).sum.toDouble/1000000000)/events.length.toDouble
+
 
   def avgArrivalRate(events:List[EventX], startAt:Long, endAt:Long) = {
     val _events    = events.filter(x=>x.monotonicTimestamp > startAt && x.monotonicTimestamp < endAt)
