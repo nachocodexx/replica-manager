@@ -1,6 +1,6 @@
 package mx.cinvestav.operations
 
-import mx.cinvestav.commons.types.{Download, DownloadCompleted, NodeUFs, NodeX, Operation, Upload, UploadCompleted}
+import mx.cinvestav.commons.types.{Download, DownloadCompleted, How, NodeUFs, NodeX, Operation, ReplicationProcess, ReplicationSchema, Upload, UploadCompleted, UploadRequest}
 import mx.cinvestav.commons.balancer.nondeterministic
 
 object Operations {
@@ -65,8 +65,8 @@ def onlyDownloadAndUploadCompleted(operations:List[Operation]): List[Operation] 
   def getWaitingTimeBySerialNumber(operations:List[Operation],serialNumber:Int) = {
     onlyDownloadAndUploadCompleted(operations = operations).find(_.serialNumber == serialNumber) match {
       case Some(value) => value match {
-        case DownloadCompleted(operationId, serialNumber, arrivalTime, serviceTime, waitingTime, objectId, nodeId, metadata) => waitingTime
-        case UploadCompleted(operationId, serialNumber, arrivalTime, serviceTime, waitingTime, objectId, nodeId, metadata) => waitingTime
+        case DownloadCompleted(operationId, serialNumber, arrivalTime, serviceTime, waitingTime,idleTime, objectId, nodeId, metadata) => waitingTime
+        case UploadCompleted(operationId, serialNumber, arrivalTime, serviceTime, waitingTime,idleTime,objectId, nodeId, metadata) => waitingTime
         case _ => 0
       }
       case None => 0
@@ -86,10 +86,9 @@ def onlyDownloadAndUploadCompleted(operations:List[Operation]): List[Operation] 
         val used      = uploads.map(_.objectSize).sum
         val downloads = onlyDownload(operations = operations).asInstanceOf[List[Download]]
         val usedD     = downloads.map(_.objectSize).sum
-
-        n.copy(
-          usedSto        val upCompleted    = onlyUploadCompleted(operations = operations)
-        val upPending      = onlyPendingUpload(operations = operations)rageCapacity       = used,
+//        usedSto        val upCompleted    = onlyUploadCompleted(operations = operations)
+//        val upPending      = onlyPendingUpload(operations = operations)rageCapacity       = used,
+      n.copy(
           availableStorageCapacity  = n.totalStorageCapacity - used,
           usedMemoryCapacity        = usedD,
           availableMemoryCapacity   = n.totalMemoryCapacity - usedD,
@@ -101,17 +100,66 @@ def onlyDownloadAndUploadCompleted(operations:List[Operation]): List[Operation] 
           ),
           metadata = Map(
             "PENDING_UPLOADS" ->upPending.length.toString,
-            "PENDING_DOWNLOADS" ->dPen,
-            "COMPLETED_UPLOADS" ->"",
-            "COMPLETED_DOWNLOADS" ->""
-      )
+            "PENDING_DOWNLOADS" ->dPending.length.toString,
+            "COMPLETED_UPLOADS" ->upCompleted.length.toString,
+            "COMPLETED_DOWNLOADS" ->dCompleted.length.toString
+      ) ++ n.metadata
         )
-    }
+    }.map(n=> n.nodeId -> n)
   }
-  def balance(x:String)(operations:List[Operation],objectSize:String) = {
+  def uploadBalance(x:String,nodexs:Map[String,NodeX])(operations:List[Operation],objectSize:Long,rf:Int = 1) = {
     x match {
       case "ROUND_ROBIN" =>
-
+        val grouped  = onlyUpload(operations).asInstanceOf[List[Upload]].groupBy(_.nodeId)
+        val xs       = grouped.map(x=> x._1 -> x._2.length)
+        val total    = xs.values.toList.sum
+        val AR       = nodexs.size
+        val selectedNodes = (0 until rf).toList.map(i => (i + (total % AR))%AR )
+        selectedNodes.map(nodexs.values.toList.sortBy(_.nodeId))
+      case "SORTING_UF" =>
+        nodexs.values.toList.sortBy(_.ufs.diskUF).take(rf)
     }
+  }
+
+  def updateNodeX(nodeX: NodeX,objectSize:Long)={
+    val usedStorageCapacity = nodeX.usedStorageCapacity + objectSize
+    val usedMemoryCapacity = nodeX.usedMemoryCapacity + objectSize
+    val availableStorageCapacity = nodeX.availableStorageCapacity - objectSize
+    val availableMemoryCapacity = nodeX.availableMemoryCapacity - objectSize
+      nodeX.copy(
+        usedStorageCapacity = usedStorageCapacity,
+        usedMemoryCapacity = usedMemoryCapacity,
+        availableStorageCapacity = availableStorageCapacity,
+        availableMemoryCapacity = availableMemoryCapacity,
+        ufs =  nodeX.ufs.copy(
+          diskUF = nondeterministic.utils.calculateUF(total = nodeX.totalStorageCapacity,used = usedStorageCapacity,objectSize = objectSize),
+          memoryUF = nondeterministic.utils.calculateUF(total = nodeX.totalMemoryCapacity,used = usedMemoryCapacity,objectSize = objectSize)
+        )
+
+    )
+  }
+
+
+  def processUploadRequest(lbToken:String,operations:List[Operation])(ur: UploadRequest,nodexs:Map[String,NodeX]) = {
+    val xx = ur.what.foldLeft((nodexs,List.empty[ReplicationSchema])) {
+      case (x, w) =>
+        val ns            = x._1
+        val rf            = w.metadata.get("REPLICATION_FACTOR").flatMap(_.toIntOption).getOrElse(1)
+        val objectSize    = w.metadata.get("OBJECT_SIZE").flatMap(_.toLongOption).getOrElse(0L)
+        val selectedNodes = Operations.uploadBalance(lbToken, ns)(operations = operations, objectSize = objectSize, rf = rf)
+        val xs            = selectedNodes.map(n => Operations.updateNodeX(n, objectSize))
+        val y             = xs.foldLeft(ns) {
+          case (xx, n) => xx.updated(n.nodeId, n)
+        }
+        val yy            = selectedNodes.map(_.nodeId).map(y)
+        val pivotNode     = yy.head
+        val where         = yy.tail.map(_.nodeId)
+        val rs            = ReplicationSchema(
+          nodes = Nil,
+          data = Map(pivotNode.nodeId -> ReplicationProcess(what = w::Nil,where =where,how = How("ACTIVE","PUSH"),when = "REACTIVE" ))
+        )
+        ( y, x._2 :+ rs )
+    }
+    xx
   }
 }

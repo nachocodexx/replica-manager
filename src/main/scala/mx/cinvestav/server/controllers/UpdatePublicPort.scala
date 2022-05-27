@@ -27,6 +27,7 @@ object UpdatePublicPort {
       headers          = req.headers
       maybePublicPort  = headers.get(CIString("Public-Port")).map(_.head.value).flatMap(_.toIntOption)
       ipAddress        = headers.get(CIString("Ip-Address")).map(_.head.value).getOrElse("127.0.0.1")
+      _ <- ctx.logger.debug(s"UPDATE_NETWORK $nodeId")
       response         <- maybePublicPort match {
         case Some(publicPort) => for  {
           _         <- IO.unit
@@ -37,6 +38,11 @@ object UpdatePublicPort {
             publicPort = publicPort,
             ipAddress  = ipAddress
           )
+          _         <- ctx.state.update{ s=>
+            s.copy(
+              nodes = s.nodes.updatedWith(nodeId)(o => o.map(oo=>oo.copy(metadata = oo.metadata + ("PUBLIC_PORT"->publicPort.toString)  )))
+            )
+          }
           _         <- Events.saveEvents(events = newEvent::Nil)
           res       <- NoContent()
         } yield res

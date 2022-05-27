@@ -124,10 +124,7 @@ object Declarations {
 
 
 
-//  case class PendingOperation()
   case class NodeState(
-                        status:Status,
-                        ip:String,
                         downloadBalancerToken:String="ROUND_ROBIN",
                         uploadBalancerToken:String="ROUND_ROBIN",
                         events:List[EventX] = Nil,
@@ -139,7 +136,7 @@ object Declarations {
                         replicationTechnique:String = "ACTIVE",
                         nodeQueue:Map[String,List[Operation] ] = Map.empty[String,List[Operation]],
                         completedQueue:Map[String,List[Operation]] = Map.empty[String,List[Operation]],
-                        operations:List[Operation],
+                        operations:List[Operation] = Nil,
                         lastSerialNumber:Int =0,
                         nodes:Map[String,NodeX] = Map.empty[String,NodeX]
 

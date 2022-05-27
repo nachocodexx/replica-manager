@@ -3,6 +3,7 @@ package mx.cinvestav.server.controllers
 import cats.implicits._
 import cats.effect._
 import mx.cinvestav.commons.events.{EventXOps, Get, Put}
+import mx.cinvestav.operations.Operations
 import org.typelevel.ci.CIString
 //
 import mx.cinvestav.Declarations.NodeContext
@@ -60,7 +61,7 @@ object StatsController {
           "nodeId" -> ctx.config.nodeId.asJson,
           "port"  -> ctx.config.port.asJson,
           "ipAddress" -> currentState.ip.asJson,
-          "nodes" -> currentState.nodes.asJson,
+          "nodes" -> Operations.processNodes(currentState.nodes,operations).toMap.asJson,
 //          "availableResources" ->arsJson,
           "distributionSchema" -> distributionSchema.asJson,
           "objectIds" -> objectsIds.sorted.asJson,

@@ -4,7 +4,7 @@ import cats.implicits._
 import cats.data.NonEmptyList
 import cats.effect.IO
 import cats.effect.std.Semaphore
-import mx.cinvestav.Declarations.{PendingSystemReplica, QueueOperation, UploadHeadersOps}
+import mx.cinvestav.Declarations.{PendingSystemReplica, UploadHeadersOps}
 import mx.cinvestav.commons.types.PendingReplication
 import org.http4s.Response
 import mx.cinvestav.commons.events.EventXOps
@@ -339,20 +339,9 @@ object UploadControllerV2 {
                   case None => for {
                     _                 <- IO.unit
                     pivotNode         = nodexs(uphs.pivotReplicaNode)
-                    operation         = QueueOperation(arrivalTime= serviceTimeStart, operationId = uphs.operationId, serialNumber = uphs.serialNumber, objectId = uphs.objectId, clientId = uphs.clientId,pullOrPushFrom = pivotNode.nodeId)
                     pivotQueue        = currentState.nodeQueue(pivotNode.nodeId)
                     replicaNodes      = uphs.replicaNodes.map(nodexs)
                     replicaNodesQueue = uphs.replicaNodes.map( rn=> rn -> currentState.nodeQueue(rn)).toMap
-//                    ADD TO QUEUE
-//                    _ <- ctx.state.update{s=>
-//                      val newQueueMap = Map(
-//                        uphs.pivotReplicaNode -> List(operation),
-//                      )
-//                      val rnQueuesMap = uphs.replicaNodes.map(rn=> Map(rn->  List(operation) )).foldLeft(Map.empty[String,List[QueueOperation]]  )(_ |+| _)
-//                      val nodesQueue = newQueueMap |+| rnQueuesMap
-//
-//                      s.copy(nodeQueue = nodesQueue)
-//                    }
                     res                <- Ok()
                   } yield res
                 }

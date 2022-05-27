@@ -37,8 +37,6 @@ object Main extends IOApp {
   def initContext(client:Client[IO]): IO[NodeContext] = for {
     _               <- Logger[IO].debug(s"POOL[${config.nodeId}]")
     _initState      = NodeState(
-      status                = commons.status.Up,
-      ip                    = InetAddress.getLocalHost.getHostAddress,
       downloadBalancerToken = config.downloadLoadBalancer,
       uploadBalancerToken   = config.uploadLoadBalancer,
       replicationFactor     = config.replicationFactor,

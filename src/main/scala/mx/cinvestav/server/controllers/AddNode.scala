@@ -38,6 +38,7 @@ object AddNode {
         headers        = req.headers
         timestamp      = headers.get(CIString("Timestamp")).flatMap(_.head.value.toLongOption)
         operationId    = headers.get(CIString("Operation-Id")).map(_.head.value).getOrElse(UUID.randomUUID().toString)
+        nodeIndex      = headers.get(CIString("Node-Index")).flatMap(_.head.value.toIntOption).getOrElse(0)
         latency        = timestamp.map(arrivalTime - _)
         serviceTimeNanos <- IO.monotonic.map(_.toNanos).map(_ - arrivalTimeNanos)
         newEvent         =  AddedNode(
@@ -63,7 +64,7 @@ object AddNode {
           totalMemoryCapacity = payload.totalMemoryCapacity,
           availableMemoryCapacity = payload.totalMemoryCapacity,
           usedMemoryCapacity = 0,
-          metadata = Map.empty[String,String],
+          metadata = Map("INDEX"->nodeIndex.toString),
           ufs = NodeUFs.empty(payload.nodeId),
         )
         _                <- ctx.state.update{
