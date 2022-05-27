@@ -4,8 +4,8 @@ import cats.data.NonEmptyList
 import cats.effect.std.Semaphore
 import cats.effect.{FiberIO, IO, Ref}
 import mx.cinvestav.commons.status.Status
-import mx.cinvestav.config.{DefaultConfig, NodeInfo}
-import mx.cinvestav.commons.types.{NodeX, PendingReplication, UploadHeaders}
+import mx.cinvestav.config.DefaultConfig
+import mx.cinvestav.commons.types.{Download, NodeX, Operation, PendingReplication, Upload, UploadHeaders}
 import mx.cinvestav.commons.events.{AddedNode, Del, Downloaded, EventX, Evicted, Get, GetCompleted, Missed, ObjectHashing, Push, Put, PutCompleted, RemovedNode, Replicated, UpdatedNodePort, Uploaded, Pull => PullEvent, TransferredTemperature => SetDownloads}
 import mx.cinvestav.events.Events.{GetInProgress, HotObject, MeasuredServiceTime, MonitoringStats, UpdatedNetworkCfg}
 import org.http4s.Headers
@@ -123,38 +123,6 @@ object Declarations {
                                )
 
 
-  trait Operation  {
-    def operationId:String
-    def serialNumber:Int
-    def arrivalTime:Long
-    def objectId:String
-    def objectSize:Long
-    def clientId:String
-    def metadata:Map[String,String]
-    def nodeId:String
-  }
-  case class Upload(operationId:String,
-                    serialNumber:Int,
-                    arrivalTime:Long,
-                    objectId:String,
-                    objectSize:Long,
-                    clientId:String,
-                    nodeId:String,
-                    metadata:Map[String,String] = Map.empty[String,String]
-                   ) extends Operation
-  case class Download(
-                       operationId:String,
-                       serialNumber:Int,
-                       arrivalTime:Long,
-                       objectId:String,
-                       objectSize:Long,
-                       clientId:String,
-                       nodeId:String,
-                       metadata:Map[String,String] = Map.empty[String,String]
-                     ) extends Operation
-
-  case class QueueOperation(arrivalTime:Long,operationId:String,serialNumber:Int,objectId:String,objectSize:Long=0L,clientId:String="",pullOrPushFrom:String="",transferType:String="PUSH")
-
 
 //  case class PendingOperation()
   case class NodeState(
@@ -169,12 +137,11 @@ object Declarations {
                         replicationFactor:Int = 0,
                         availableResources:Int = 5,
                         replicationTechnique:String = "ACTIVE",
-//                        currentOperation:QueueOperation = QueueOperation(0,"",0,""),
-//                        clientOperations:Map[String,List[QueueOperation] ] = Map.empty[String,List[QueueOperation]],
                         nodeQueue:Map[String,List[Operation] ] = Map.empty[String,List[Operation]],
+                        completedQueue:Map[String,List[Operation]] = Map.empty[String,List[Operation]],
+                        operations:List[Operation],
                         lastSerialNumber:Int =0,
-//                        lastOperation:Int = 0,
-//                        pendingOperations:Map[String,QueueOperation]=Map.empty[String,QueueOperation],
+                        nodes:Map[String,NodeX] = Map.empty[String,NodeX]
 
                         )
   case class NodeContext(

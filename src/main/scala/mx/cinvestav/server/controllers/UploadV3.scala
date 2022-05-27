@@ -4,11 +4,11 @@ import cats.data.NonEmptyList
 import cats.implicits._
 import cats.effect._
 import cats.effect.std.Semaphore
-import mx.cinvestav.Declarations.{Download, NodeContext, Operation, Upload}
+import mx.cinvestav.Declarations.NodeContext
 import org.http4s._
 import org.http4s.implicits._
 import org.http4s.dsl.io._
-import mx.cinvestav.commons.types.{NodeBalance, NodeReplicationSchema, NodeX, ReplicationProcess, ReplicationSchema, UploadBalance, What}
+import mx.cinvestav.commons.types.{NodeBalance, NodeReplicationSchema, NodeX, ReplicationProcess, ReplicationSchema, Upload, UploadBalance, UploadCompleted, What}
 import org.http4s.circe.CirceEntityDecoder._
 import org.http4s.circe.CirceEntityEncoder._
 import io.circe.syntax._
@@ -18,6 +18,7 @@ import mx.cinvestav.events.Events
 import mx.cinvestav.commons.events.{EventX, EventXOps}
 import org.typelevel.ci.CIString
 import mx.cinvestav.commons.utils
+import mx.cinvestav.operations.Operations
 //import mx.cinvestav.commons.utils
 
 
@@ -216,7 +217,7 @@ object UploadV3 {
       nodesQueue         = currentState.nodeQueue
       rawEvents          = currentState.events
       events             = Events.orderAndFilterEventsMonotonicV2(events = rawEvents)
-      avgServiceTimes    = Events.getAvgServiceTimeByNode(events = events)
+      avgServiceTimes    = Operations.getAVGServiceTime(operations= currentState.operations)
       nodexs             = EventXOps.getAllNodeXs(events = events).map(n=>n.nodeId -> n).toMap
       nx                 = NonEmptyList.fromListUnsafe(nodexs.values.toList)
       maybeSelectedNodes = UploadControllerV2.balance(events)(
@@ -257,10 +258,16 @@ object UploadV3 {
           for {
             _    <- ctx.state.update{
                 s=>
-                  val xs = nodes.map(_._2).toMap.map{
+                  val opsMap  = nodes.map(_._2)
+                  val ops     = opsMap.toMap.values.toList
+                  val xs      = opsMap .toMap.map{
                     case (nId,x) => nId-> (x::Nil)
                   }.toMap
-                  s.copy(nodeQueue = s.nodeQueue |+| xs  )
+                  s.copy(
+
+                    nodeQueue = s.nodeQueue |+| xs  ,
+                    operations = s.operations ++ ops.asInstanceOf[List[Operation]]
+                  )
             }
             res  <- Ok(
                  UploadBalance(

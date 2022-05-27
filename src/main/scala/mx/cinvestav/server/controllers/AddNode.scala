@@ -5,7 +5,7 @@ import mx.cinvestav.Declarations.NodeContext
 import mx.cinvestav.Helpers
 import mx.cinvestav.commons.events.AddedNode
 import mx.cinvestav.commons.events.ServiceReplicator.AddedStorageNode
-import mx.cinvestav.commons.types.NodeX
+import mx.cinvestav.commons.types.{NodeUFs, NodeX}
 import mx.cinvestav.events.Events
 
 import java.util.UUID
@@ -53,7 +53,25 @@ object AddNode {
           correlationId = operationId,
           monotonicTimestamp = 0L
         )
-        _                <- ctx.state.update{s=>s.copy(nodeQueue = s.nodeQueue + (payload.nodeId -> Nil) )}
+        nodex            = NodeX(
+          nodeId = payload.nodeId,
+          ip = payload.nodeId,
+          port = payload.port,
+          totalStorageCapacity = payload.totalStorageCapacity,
+          availableStorageCapacity = payload.totalStorageCapacity,
+          usedStorageCapacity = 0,
+          totalMemoryCapacity = payload.totalMemoryCapacity,
+          availableMemoryCapacity = payload.totalMemoryCapacity,
+          usedMemoryCapacity = 0,
+          metadata = Map.empty[String,String],
+          ufs = NodeUFs.empty(payload.nodeId),
+        )
+        _                <- ctx.state.update{
+          s=>s.copy(
+            nodeQueue = s.nodeQueue + (payload.nodeId -> Nil),
+            nodes     =  s.nodes + (payload.nodeId-> nodex)
+          )
+        }
         _                <- Events.saveEvents(events =newEvent ::Nil)
         response         <- NoContent()
       } yield response

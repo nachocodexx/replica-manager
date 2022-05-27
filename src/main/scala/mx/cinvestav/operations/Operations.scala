@@ -1,0 +1,117 @@
+package mx.cinvestav.operations
+
+import mx.cinvestav.commons.types.{Download, DownloadCompleted, NodeUFs, NodeX, Operation, Upload, UploadCompleted}
+import mx.cinvestav.commons.balancer.nondeterministic
+
+object Operations {
+  def onlyUpload(operations:List[Operation]): List[Operation] = operations.filter {
+    case _:Upload => true
+    case _ => false
+  }
+  def onlyUploadCompleted(operations:List[Operation]): List[Operation] = operations.filter {
+    case _:UploadCompleted => true
+    case _ => false
+  }
+// _____________________________________________________________________________________________________________________
+  def onlyDownload(operations:List[Operation]): List[Operation] = operations.filter {
+    case _:Download => true
+    case _ => false
+  }
+  def onlyDownloadCompleted(operations:List[Operation]): List[Operation] = operations.filter {
+    case _:DownloadCompleted => true
+    case _ => false
+  }
+// _____________________________________________________________________________________________________________________
+def onlyDownloadAndUploadCompleted(operations:List[Operation]): List[Operation] = operations.filter {
+  case _:DownloadCompleted | _:UploadCompleted => true
+  case _ => false
+}
+
+  def onlyPendingUpload(operations:List[Operation]) ={
+    val ups = onlyUpload(operations = operations)
+    val upsC = onlyUploadCompleted(operations = operations)
+    val ipsCIds = upsC.map(_.nodeId)
+    ups.filterNot{ up=>
+      ipsCIds.contains(up.nodeId)
+    }
+  }
+
+  def onlyPendingDownload(operations:List[Operation]) ={
+    val ups = onlyDownload(operations = operations)
+    val upsC = onlyDownloadCompleted(operations = operations)
+    val ipsCIds = upsC.map(_.nodeId)
+    ups.filterNot{ up=>
+      ipsCIds.contains(up.nodeId)
+    }
+  }
+
+  def getAVGServiceTime(operations:List[Operation]): Map[String, Double] = {
+    val upAndDownC = onlyDownloadAndUploadCompleted(operations = operations).groupBy(_.nodeId)
+    upAndDownC.map{
+      case (nodeId,xs)=> nodeId ->  {
+       val x=  xs.map{
+          case dc:DownloadCompleted => dc.serviceTime
+          case dc:UploadCompleted => dc.serviceTime
+          case _ => Long.MaxValue
+        }
+        if(x.isEmpty) Long.MaxValue else x.sum.toDouble/x.length.toDouble
+      }
+    }
+//      .map {
+//    }
+//
+//    if(xs.isEmpty) Long.MaxValue else xs.sum/xs.length
+  }
+  def getWaitingTimeBySerialNumber(operations:List[Operation],serialNumber:Int) = {
+    onlyDownloadAndUploadCompleted(operations = operations).find(_.serialNumber == serialNumber) match {
+      case Some(value) => value match {
+        case DownloadCompleted(operationId, serialNumber, arrivalTime, serviceTime, waitingTime, objectId, nodeId, metadata) => waitingTime
+        case UploadCompleted(operationId, serialNumber, arrivalTime, serviceTime, waitingTime, objectId, nodeId, metadata) => waitingTime
+        case _ => 0
+      }
+      case None => 0
+    }
+  }
+
+
+  def processNodes(nodexs:Map[String,NodeX],operations:List[Operation],objectSize:Long=0L)  = {
+    nodexs.map{
+      case (nodeId,n) =>
+//        val upCompletedIds = upCompleted.map(_.nodeId)
+        val upCompleted    = onlyUploadCompleted(operations = operations)
+        val upPending      = onlyPendingUpload(operations = operations)
+        val dCompleted    = onlyDownloadCompleted(operations = operations)
+        val dPending      = onlyPendingDownload(operations = operations)
+        val uploads   = onlyUpload(operations = operations).asInstanceOf[List[Upload]]
+        val used      = uploads.map(_.objectSize).sum
+        val downloads = onlyDownload(operations = operations).asInstanceOf[List[Download]]
+        val usedD     = downloads.map(_.objectSize).sum
+
+        n.copy(
+          usedSto        val upCompleted    = onlyUploadCompleted(operations = operations)
+        val upPending      = onlyPendingUpload(operations = operations)rageCapacity       = used,
+          availableStorageCapacity  = n.totalStorageCapacity - used,
+          usedMemoryCapacity        = usedD,
+          availableMemoryCapacity   = n.totalMemoryCapacity - usedD,
+          ufs                       = NodeUFs(
+            nodeId   = n.nodeId,
+            diskUF   = nondeterministic.utils.calculateUF(total =  n.totalStorageCapacity,used = used,objectSize= objectSize),
+            memoryUF = nondeterministic.utils.calculateUF(total =  n.totalMemoryCapacity,used = usedD,objectSize= objectSize),
+            cpuUF    = 0.0
+          ),
+          metadata = Map(
+            "PENDING_UPLOADS" ->upPending.length.toString,
+            "PENDING_DOWNLOADS" ->dPen,
+            "COMPLETED_UPLOADS" ->"",
+            "COMPLETED_DOWNLOADS" ->""
+      )
+        )
+    }
+  }
+  def balance(x:String)(operations:List[Operation],objectSize:String) = {
+    x match {
+      case "ROUND_ROBIN" =>
+
+    }
+  }
+}

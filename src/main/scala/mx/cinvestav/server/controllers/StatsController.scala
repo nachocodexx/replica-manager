@@ -31,6 +31,7 @@ object StatsController {
         rawEvents          = currentState.events
         events             = Events.orderAndFilterEventsMonotonicV2(events = rawEvents)
         nodesQueue         = currentState.nodeQueue
+        operations         = currentState .operations
         ars                = EventXOps.getAllNodeXs(events=events).map { node =>
               val nodeId = node.nodeId
               val publicPort = Events.getPublicPort(events= events,nodeId).map(_.publicPort).getOrElse(6666)
@@ -59,7 +60,8 @@ object StatsController {
           "nodeId" -> ctx.config.nodeId.asJson,
           "port"  -> ctx.config.port.asJson,
           "ipAddress" -> currentState.ip.asJson,
-          "availableResources" ->arsJson,
+          "nodes" -> currentState.nodes.asJson,
+//          "availableResources" ->arsJson,
           "distributionSchema" -> distributionSchema.asJson,
           "objectIds" -> objectsIds.sorted.asJson,
           "nodeIds" -> nodeIds.asJson,
@@ -71,7 +73,8 @@ object StatsController {
             "upload" -> currentState.uploadBalancerToken.asJson
           ),
           "apiVersion" -> ctx.config.apiVersion.asJson,
-          "queues" -> nodesQueue.asJson
+          "queues" -> nodesQueue.asJson,
+          "operations" -> operations.asJson
 
         )
         response <- Ok(stats)
