@@ -5,7 +5,7 @@ import cats.effect.std.Semaphore
 import cats.effect.{FiberIO, IO, Ref}
 import mx.cinvestav.commons.status.Status
 import mx.cinvestav.config.DefaultConfig
-import mx.cinvestav.commons.types.{Download, NodeX, Operation, PendingReplication, Upload, UploadHeaders}
+import mx.cinvestav.commons.types.{CompletedOperation, Download, NodeX, Operation, PendingReplication, Upload, UploadHeaders}
 import mx.cinvestav.commons.events.{AddedNode, Del, Downloaded, EventX, Evicted, Get, GetCompleted, Missed, ObjectHashing, Push, Put, PutCompleted, RemovedNode, Replicated, UpdatedNodePort, Uploaded, Pull => PullEvent, TransferredTemperature => SetDownloads}
 import mx.cinvestav.events.Events.{GetInProgress, HotObject, MeasuredServiceTime, MonitoringStats, UpdatedNetworkCfg}
 import org.http4s.Headers
@@ -136,8 +136,9 @@ object Declarations {
                         replicationTechnique:String = "ACTIVE",
                         pendingQueue:Map[String,Option[Operation]] = Map.empty[String,Option[Operation]],
                         nodeQueue:Map[String,List[Operation] ] = Map.empty[String,List[Operation]],
-                        completedQueue:Map[String,List[Operation]] = Map.empty[String,List[Operation]],
+                        completedQueue:Map[String,List[CompletedOperation]] = Map.empty[String,List[CompletedOperation]],
                         operations:List[Operation] = Nil,
+                        completedOperations:List[CompletedOperation] = Nil,
                         lastSerialNumber:Int =0,
                         nodes:Map[String,NodeX] = Map.empty[String,NodeX]
 

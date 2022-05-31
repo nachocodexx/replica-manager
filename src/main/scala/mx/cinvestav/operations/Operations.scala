@@ -1,6 +1,6 @@
 package mx.cinvestav.operations
 
-import mx.cinvestav.commons.types.{Download, DownloadCompleted, How, NodeUFs, NodeX, Operation, ReplicationProcess, ReplicationSchema, Upload, UploadCompleted, UploadRequest}
+import mx.cinvestav.commons.types.{CompletedOperation, Download, DownloadCompleted, How, NodeUFs, NodeX, Operation, ReplicationProcess, ReplicationSchema, Upload, UploadCompleted, UploadRequest}
 import mx.cinvestav.commons.balancer.nondeterministic
 
 object Operations {
@@ -22,10 +22,10 @@ object Operations {
     case _ => false
   }
 // _____________________________________________________________________________________________________________________
-def onlyDownloadAndUploadCompleted(operations:List[Operation]): List[Operation] = operations.filter {
-  case _:DownloadCompleted | _:UploadCompleted => true
-  case _ => false
-}
+//def onlyDownloadAndUploadCompleted(operations:List[CompletedOperation]): List[Com] = operations.filter {
+//  case _:DownloadCompleted | _:UploadCompleted => true
+//  case _ => false
+//}
 
   def onlyPendingUpload(operations:List[Operation]) ={
     val ups = onlyUpload(operations = operations)
@@ -45,9 +45,9 @@ def onlyDownloadAndUploadCompleted(operations:List[Operation]): List[Operation] 
     }
   }
 
-  def getAVGServiceTime(operations:List[Operation]): Map[String, Double] = {
-    val upAndDownC = onlyDownloadAndUploadCompleted(operations = operations).groupBy(_.nodeId)
-    upAndDownC.map{
+  def getAVGServiceTime(operations:List[CompletedOperation]): Map[String, Double] = {
+//    val upAndDownC = onlyDownloadAndUploadCompleted(operations = operations).groupBy(_.nodeId)
+    operations.groupBy(_.nodeId).map{
       case (nodeId,xs)=> nodeId ->  {
        val x=  xs.map{
           case dc:DownloadCompleted => dc.serviceTime
@@ -57,21 +57,17 @@ def onlyDownloadAndUploadCompleted(operations:List[Operation]): List[Operation] 
         if(x.isEmpty) Long.MaxValue else x.sum.toDouble/x.length.toDouble
       }
     }
-//      .map {
+  }
+//  def getWaitingTimeBySerialNumber(operations:List[CompletedOperation],serialNumber:Int) = {
+//    onlyDownloadAndUploadCompleted(operations = operations).find(_.serialNumber == serialNumber) match {
+//      case Some(value) => value match {
+//        case DownloadCompleted(operationId, serialNumber, arrivalTime, serviceTime, waitingTime,idleTime, objectId, nodeId, metadata) => waitingTime
+//        case UploadCompleted(operationId, serialNumber, arrivalTime, serviceTime, waitingTime,idleTime,objectId, nodeId, metadata) => waitingTime
+//        case _ => 0
+//      }
+//      case None => 0
 //    }
-//
-//    if(xs.isEmpty) Long.MaxValue else xs.sum/xs.length
-  }
-  def getWaitingTimeBySerialNumber(operations:List[Operation],serialNumber:Int) = {
-    onlyDownloadAndUploadCompleted(operations = operations).find(_.serialNumber == serialNumber) match {
-      case Some(value) => value match {
-        case DownloadCompleted(operationId, serialNumber, arrivalTime, serviceTime, waitingTime,idleTime, objectId, nodeId, metadata) => waitingTime
-        case UploadCompleted(operationId, serialNumber, arrivalTime, serviceTime, waitingTime,idleTime,objectId, nodeId, metadata) => waitingTime
-        case _ => 0
-      }
-      case None => 0
-    }
-  }
+//  }
 
 
   def processNodes(nodexs:Map[String,NodeX],operations:List[Operation],objectSize:Long=0L)  = {
@@ -151,21 +147,21 @@ def onlyDownloadAndUploadCompleted(operations:List[Operation]): List[Operation] 
   }
 
 
-  def processUploadRequest(lbToken:String,operations:List[Operation])(ur: UploadRequest,nodexs:Map[String,NodeX]) = {
-    val xx = ur.what.foldLeft((nodexs,List.empty[ReplicationSchema])) {
+  def processUploadRequest(lbToken:String="SORTING_UF",operations:List[Operation])(ur: UploadRequest,nodexs:Map[String,NodeX]) = {
+    val xx = ur.what.foldLeft((nodexs,List.empty[ReplicationSchema] )) {
       case (x, w) =>
-        val ns            = x._1
-        val rf            = w.metadata.get("REPLICATION_FACTOR").flatMap(_.toIntOption).getOrElse(1)
+        val ns = x._1
+        val rf = w.metadata.get("REPLICATION_FACTOR").flatMap(_.toIntOption).getOrElse(1)
+
         val objectSize    = w.metadata.get("OBJECT_SIZE").flatMap(_.toLongOption).getOrElse(0L)
         val selectedNodes = Operations.uploadBalance(lbToken, ns)(operations = operations, objectSize = objectSize, rf = rf)
-        val xs            = selectedNodes.map(n => Operations.updateNodeX(n, objectSize))
-        val y             = xs.foldLeft(ns) {
-          case (xx, n) => xx.updated(n.nodeId, n)
-        }
+        val xs = selectedNodes
+        //          val xs            = selectedNodes.map(n => Operations.updateNodeX(n, objectSize))
+        val y             = xs.foldLeft(ns) { case (xx, n) => xx.updated(n.nodeId, n)}
         val yy            = selectedNodes.map(_.nodeId).map(y)
         val pivotNode     = yy.head
         val where         = yy.tail.map(_.nodeId)
-        val rs            = ReplicationSchema(
+        val rs = ReplicationSchema(
           nodes = Nil,
           data = Map(pivotNode.nodeId -> ReplicationProcess(what = w::Nil,where =where,how = How("ACTIVE","PUSH"),when = "REACTIVE" ))
         )
@@ -173,4 +169,27 @@ def onlyDownloadAndUploadCompleted(operations:List[Operation]): List[Operation] 
     }
     xx
   }
+  //
+  //  def processUploadRequest()(ur: UploadRequest,nodexs:Map[String,NodeX]) = {
+//    val xx = ur.what.foldLeft((nodexs,List.empty[ReplicationSchema])) {
+//      case (x, w) =>
+//        val ns            = x._1
+//        val rf            = w.metadata.get("REPLICATION_FACTOR").flatMap(_.toIntOption).getOrElse(1)
+//        val objectSize    = w.metadata.get("OBJECT_SIZE").flatMap(_.toLongOption).getOrElse(0L)
+//        val selectedNodes = Operations.uploadBalance(lbToken, ns)(operations = operations, objectSize = objectSize, rf = rf)
+//        val xs            = selectedNodes.map(n => Operations.updateNodeX(n, objectSize))
+//        val y             = xs.foldLeft(ns) {
+//          case (xx, n) => xx.updated(n.nodeId, n)
+//        }
+//        val yy            = selectedNodes.map(_.nodeId).map(y)
+//        val pivotNode     = yy.head
+//        val where         = yy.tail.map(_.nodeId)
+//        val rs            = ReplicationSchema(
+//          nodes = Nil,
+//          data = Map(pivotNode.nodeId -> ReplicationProcess(what = w::Nil,where =where,how = How("ACTIVE","PUSH"),when = "REACTIVE" ))
+//        )
+//        ( y, x._2 :+ rs )
+//    }
+//    xx
+//  }
 }

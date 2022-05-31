@@ -209,10 +209,16 @@ object UploadV3 {
 //    __________________________________________________________________________________________________________________
       currentState       <- ctx.state.get
       nodesQueue         = currentState.nodeQueue
-      avgServiceTimes    = Operations.getAVGServiceTime(operations= currentState.operations)
+      avgServiceTimes    = Operations.getAVGServiceTime(operations= currentState.completedOperations)
       nodexs             = currentState.nodes
       ar                 = nodexs.size
 //    __________________________________________________________________________________________________________________
+      _                  <- ctx.logger.debug(avgServiceTimes.asJson.toString)
+      x                  = Operations.processUploadRequest(operations = currentState.operations)(ur = payload,nodexs = nodexs)
+      _                  <- ctx.state.update{ s=>
+        s.copy(nodes = x._1)
+      }
+      _                  <- ctx.logger.debug(x._2.toString)
       serviceTime        <- IO.monotonic.map(_.toNanos - arrivalTime)
       response           <- Ok()
       _                  <- s.release
@@ -237,7 +243,7 @@ object UploadV3 {
         case Some(o) =>
           o match {
             case up:Upload =>
-              val wt  = lastCompleted.map(_.arrivalTime).getOrElse(0L) - up.arrivalTime
+              val wt  = lastCompleted.map(_.departureTime).getOrElse(0L) - up.arrivalTime
               val completed  = UploadCompleted(
                 operationId  = up.operationId,
                 serialNumber = up.serialNumber,
@@ -247,15 +253,20 @@ object UploadV3 {
                 idleTime     = if(wt < 0L) wt*(-1) else 0L,
                 objectId     = objectId,
                 nodeId       = nodeId,
-                metadata      = Map.empty[String,String]
+                metadata      = Map.empty[String,String],
               )
+              val nextOp    = nodeQueue.headOption
                val saveOp = ctx.state.update{ s=>
                  s.copy(
-                   completedQueue =  s.completedQueue.updatedWith(nodeId)(op=>op.map( x => x :+ completed )),
-                   operations     =  s.operations :+completed
+                   completedQueue      =  s.completedQueue.updatedWith(nodeId)(op=>op.map( x => x :+ completed )),
+                   completedOperations =  s.completedOperations :+completed,
+                   pendingQueue        =  s.pendingQueue.updated(nodeId,nextOp)
                  )
                }
-              NoContent()
+              for {
+                _   <- saveOp
+                res <- NoContent()
+              } yield res
             case _ => NotFound()
           }
         case None => NotFound()
@@ -272,10 +283,10 @@ object UploadV3 {
         headers      = req.headers
         clientId     = headers.get(CIString("Client-Id")).map(_.head.value).getOrElse("CLIENT_ID")
         payload      <- req.as[ReplicationSchema]
-        nrss         = payload.nodes
-        _            <- nrss.traverse{ nrs=>
-          ctx.config.systemReplication.createNode(nrs =nrs)
-        }.start
+//        nrss         = payload.nodes
+//        _            <- nrss.traverse{ nrs=>
+//          ctx.config.systemReplication.createNode(nrs =nrs)
+//        }.start
 //        res <- genQueue(events = events, payload = payload,nodexs=nodexs)
 //        _ <- res match {
 //          case Left(value) => ctx.logger.error(value.toString)

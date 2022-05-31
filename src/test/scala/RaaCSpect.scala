@@ -1,4 +1,4 @@
-import mx.cinvestav.commons.types.{How, NodeUFs, NodeX, Operation, ReplicationProcess, ReplicationSchema, Upload, UploadBalance, UploadRequest, What}
+import mx.cinvestav.commons.types.{How, NodeUFs, NodeX, Operation, ReplicationProcess, ReplicationSchema, Upload, UploadBalance, UploadCompleted, UploadRequest, What}
 import mx.cinvestav.operations.Operations
 import mx.cinvestav.commons.utils
 import cats.implicits._
@@ -91,6 +91,16 @@ class RaaCSpect extends munit .CatsEffectSuite {
       elastic = false
     )
 
+
+
+    def launchOps(xs:Map[String,List[Operation]])(implicit ctx:NodeContext) = {
+       for  {
+          currentState <- ctx.state.get
+          pendingOps   = currentState.pendingQueue
+         nodeIds       = xs.keys.toList
+       } yield ()
+    }
+
     def processRS(clientId:String)(rs:ReplicationSchema )(implicit ctx:NodeContext) = {
       rs.data.toList.traverse{
         case (nodeId, rp) =>
@@ -144,9 +154,7 @@ class RaaCSpect extends munit .CatsEffectSuite {
       state       <-  IO.ref(NodeState(
         completedQueue = Map(
           "sn-0"-> List(
-            Upload.empty,
-            Upload.empty,
-            Upload.empty,
+            UploadCompleted.empty,
           )
         )
       ))
@@ -172,7 +180,10 @@ class RaaCSpect extends munit .CatsEffectSuite {
       clientId     = "client-0"
 //    ____________________________________
       xs           <- x._2.traverse(processRS(clientId)).map(_.flatten)
-      xsGrouped    = xs.groupBy(_.nodeId)
+      xsGrouped    = xs.groupBy(_.nodeId).map{
+        case (nId,ops)=> nId -> ops.sortBy(_.serialNumber)
+      }
+
       _            <- IO.println(xsGrouped.asJson.toString)
       
 //    ____________________________________
