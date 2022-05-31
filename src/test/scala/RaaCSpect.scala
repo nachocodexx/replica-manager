@@ -1,4 +1,4 @@
-import mx.cinvestav.commons.types.{How, NodeUFs, NodeX, ReplicationProcess, ReplicationSchema, Upload, UploadRequest, What}
+import mx.cinvestav.commons.types.{How, NodeUFs, NodeX, Operation, ReplicationProcess, ReplicationSchema, Upload, UploadBalance, UploadRequest, What}
 import mx.cinvestav.operations.Operations
 import mx.cinvestav.commons.utils
 import cats.implicits._
@@ -7,9 +7,13 @@ import fs2.concurrent.SignallingRef
 import mx.cinvestav.Declarations.{NodeContext, NodeState}
 import mx.cinvestav.config.DefaultConfig
 import org.http4s.blaze.client.BlazeClientBuilder
+import org.typelevel.log4cats.slf4j.Slf4jLogger
 
-import java.lang.System.Logger
 import scala.concurrent.ExecutionContext
+import io.circe._
+import io.circe.syntax._
+import io.circe.generic.auto._
+import mx.cinvestav.Declarations.Implicits._
 class RaaCSpect extends munit .CatsEffectSuite {
 
   test("K") {
@@ -52,24 +56,21 @@ class RaaCSpect extends munit .CatsEffectSuite {
         usedMemoryCapacity = 0)
 
     )
-    val operations = List(
-      Upload(operationId = "up-0", serialNumber = 0, arrivalTime = 0, objectId = "f1", objectSize = 10, clientId = "", nodeId = "sn-0", metadata = Map.empty[String, String])
-    )
-    val fn =
-      (ur: UploadRequest) => {
-      val xx = ur.what.foldLeft(
-        (nodexs,List.empty[ReplicationSchema])
-      ) {
+//    val operations = List(
+//      Upload(operationId = "up-0", serialNumber = 0, arrivalTime = 0, objectId = "f1", objectSize = 10, clientId = "", nodeId = "sn-0", metadata = Map.empty[String, String])
+//    )
+//  ________________________________________________________________
+    def fn(ur: UploadRequest,operations:List[Operation]) = {
+      val xx = ur.what.foldLeft((nodexs,List.empty[ReplicationSchema] )) {
         case (x, w) =>
           val ns = x._1
           val rf = w.metadata.get("REPLICATION_FACTOR").flatMap(_.toIntOption).getOrElse(1)
 
           val objectSize    = w.metadata.get("OBJECT_SIZE").flatMap(_.toLongOption).getOrElse(0L)
           val selectedNodes = Operations.uploadBalance("SORTING_UF", ns)(operations = operations, objectSize = objectSize, rf = rf)
-          val xs            = selectedNodes.map(n => Operations.updateNodeX(n, objectSize))
-          val y             = xs.foldLeft(ns) {
-            case (xx, n) => xx.updated(n.nodeId, n)
-          }
+          val xs = selectedNodes
+//          val xs            = selectedNodes.map(n => Operations.updateNodeX(n, objectSize))
+          val y             = xs.foldLeft(ns) { case (xx, n) => xx.updated(n.nodeId, n)}
           val yy            = selectedNodes.map(_.nodeId).map(y)
           val pivotNode     = yy.head
           val where         = yy.tail.map(_.nodeId)
@@ -90,10 +91,7 @@ class RaaCSpect extends munit .CatsEffectSuite {
       elastic = false
     )
 
-    def processRS (rs:ReplicationSchema )(implicit ctx:NodeContext) = {
-      val xs       = rs.data.flatMap(_._2.where).toList
-      val nodesIds = (rs.data.keys.toList ++ xs ).distinct
-
+    def processRS(clientId:String)(rs:ReplicationSchema )(implicit ctx:NodeContext) = {
       rs.data.toList.traverse{
         case (nodeId, rp) =>
           for {
@@ -102,90 +100,85 @@ class RaaCSpect extends munit .CatsEffectSuite {
             where          = rp.where
             whereCompleted = where :+ nodeId
             operations     <- what.traverse{ w=>
-              val opId = utils.generateNodeId(prefix = "op",autoId = true)
+              val opId     = utils.generateNodeId(prefix = "op",autoId = true)
               for {
                 arrivalTime  <- IO.monotonic.map(_.toNanos)
                 currentState <- ctx.state.get
+                queue        = currentState.nodeQueue
                 objectSize   = w.metadata.get("OBJECT_SIZE").flatMap(_.toLongOption).getOrElse(0L)
                 up           = Upload(
                   operationId = opId,
-                  serialNumber = 0,
+                  serialNumber = -1,
                   arrivalTime =arrivalTime ,
                   objectId = w.id,
                   objectSize = objectSize,
-                  clientId = "",
-                  nodeId = "",
+                  clientId = clientId,
+                  nodeId = "NODE_ID",
                   metadata = Map.empty[String,String]
                 )
-                ops          = whereCompleted.foldLeft(currentState.nodeQueue){
-                  case (queues,n)=>
+                ops          = whereCompleted.foldLeft( (queue,List.empty[Operation]) ){
+                  case (x,n)=>
+                    val queues = x._1
                     val q = queues.getOrElse(n,Nil)
-                    queues.updated(n,q :+ up.copy(serialNumber = q.length,nodeId = n))
+                    val completed = currentState.completedQueue.getOrElse(n,Nil)
+                    val op = up.copy(serialNumber = q.length+completed.length,nodeId = n)
+                    (
+                      queues.updated(n,q :+ op),
+                      x._2:+op
+                    )
                 }
-              } yield ()
-            }
-
-          } yield ()
-      }
-//      nodesIds.traverse{ nId =>
-//        for {
-//          maybeRp = rs.data.get(nId)
-//          x       = maybeRp match {
-//            case Some(rp) =>
-//              rp.what.map { w =>
-//                Upload(
-//                  operationId = opId,
-//                  serialNumber = ???,
-//                  arrivalTime = ???,
-//                  objectId = ???,
-//                  objectSize = ???,
-//                  clientId = ???,
-//                  nodeId = ???,
-//                  metadata = ???
-//                )
-//              }
-//            case None => Nil
-//          }
-////          up =  Upload(operationId =opId, serialNumber = 0, arrivalTime = arrivalTime, objectId = ???, objectSize = ???, clientId = ???, nodeId = ???, metadata = ???)
-//        } yield ()
-//      }
+                _            <- ctx.state.update{ s=>
+                  s.copy(nodeQueue =  ops._1)
+                }
+              } yield ops._2
+            }.map(_.flatten)
+          } yield operations
+      }.map(_.flatten)
     }
 
-    val res = fn(ur0)
+//    val res = fn(ur0)
 
 
     for {
-      _ <- IO.unit
-      state <-  IO.ref(NodeState())
-      ctx = NodeContext(
-        config = DefaultConfig(),
-        logger = Logger[IO],
-        errorLogger = Logger[IO],
-        state =state,
-        client                     = BlazeClientBuilder[IO](executionContext = ExecutionContext.global).withDefaultSocketReuseAddress.resource.allocated,
-        systemReplicationSignal = SignallingRef[IO](false)
+      _           <- IO.unit
+      state       <-  IO.ref(NodeState(
+        completedQueue = Map(
+          "sn-0"-> List(
+            Upload.empty,
+            Upload.empty,
+            Upload.empty,
+          )
+        )
+      ))
+      (client,fx) <- BlazeClientBuilder[IO](executionContext = ExecutionContext.global).resource.allocated
+      signal      <- SignallingRef[IO,Boolean](false)
+//    __________________________________________________________________
+      implicit0(ctx:NodeContext)         = NodeContext(
+        config                  = DefaultConfig(),
+        logger                  = Slf4jLogger.getLogger[IO],
+        errorLogger             = Slf4jLogger.getLogger[IO],
+        state                   = state,
+        client                  = client,
+        systemReplicationSignal = signal
       )
+      ur          = UploadRequest(
+        what = List(
+          What(id = "f1", url = "", metadata = Map("OBJECT_SIZE"->"10", "REPLICATION_FACTOR"-> "3")  ),
+          What(id = "f2", url = "", metadata = Map("OBJECT_SIZE"->"10", "REPLICATION_FACTOR"-> "3")  )
+        ),
+        elastic = true
+      )
+      x            = fn(ur = ur,operations = Nil)
+      clientId     = "client-0"
+//    ____________________________________
+      xs           <- x._2.traverse(processRS(clientId)).map(_.flatten)
+      xsGrouped    = xs.groupBy(_.nodeId)
+      _            <- IO.println(xsGrouped.asJson.toString)
+      
+//    ____________________________________
+      currentState <- ctx.state.get
+      _            <- IO.println(currentState.nodeQueue.asJson.toString)
     } yield ()
-
-
-    //    val fn = (rs:UploadRequest) => {
-    //          val xx = rp.what.foldLeft(nodexs){
-    //            case (ns,w )=>
-    //              val rf            = w.metadata.get("REPLICATION_FACTOR").flatMap(_.toIntOption).getOrElse(0)
-    //
-    //              val objectSize    = w.metadata.get("OBJECT_SIZE").flatMap(_.toLongOption).getOrElse(0L)
-    //              val pivotNode     = ns(nodeId)
-    //              val nodesWithoutPivot = ns.filter(_._1 != nodeId)
-    //              val selectedNodes = Operations.uploadBalance("SORTING_UF",nodesWithoutPivot)(operations = operations,objectSize= objectSize,rf=rf):+ pivotNode
-    //              val xs            = selectedNodes.map(n=> Operations.updateNodeX(n,objectSize))
-    //              val y             = xs.foldLeft(ns){
-    //                case (xx,n ) =>xx.updated(n.nodeId,n)
-    //              }
-    //              y
-    //          }
-    //          xx
-    //      }
-    //  }
   }
 
 }

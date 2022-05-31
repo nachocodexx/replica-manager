@@ -60,7 +60,7 @@ object StatsController {
         stats              = Map(
           "nodeId" -> ctx.config.nodeId.asJson,
           "port"  -> ctx.config.port.asJson,
-          "ipAddress" -> currentState.ip.asJson,
+//          "ipAddress" -> currentState.ip.asJson,
           "nodes" -> Operations.processNodes(currentState.nodes,operations).toMap.asJson,
 //          "availableResources" ->arsJson,
           "distributionSchema" -> distributionSchema.asJson,

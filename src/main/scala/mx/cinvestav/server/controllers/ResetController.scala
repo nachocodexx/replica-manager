@@ -46,7 +46,7 @@ object ResetController {
 
         }.traverse{req=>ctx.client.status(req)}
         _   <- ctx.config.systemReplication.reset().start
-        _   <- ctx.config.dataReplication.reset().start
+//        _   <- ctx.config.dataReplication.reset().start
         _   <- ctx.logger.debug(x.toString)
         res <- NoContent()
       } yield res

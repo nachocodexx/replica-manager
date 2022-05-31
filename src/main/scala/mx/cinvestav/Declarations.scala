@@ -134,6 +134,7 @@ object Declarations {
                         replicationFactor:Int = 0,
                         availableResources:Int = 5,
                         replicationTechnique:String = "ACTIVE",
+                        pendingQueue:Map[String,Option[Operation]] = Map.empty[String,Option[Operation]],
                         nodeQueue:Map[String,List[Operation] ] = Map.empty[String,List[Operation]],
                         completedQueue:Map[String,List[Operation]] = Map.empty[String,List[Operation]],
                         operations:List[Operation] = Nil,

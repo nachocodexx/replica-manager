@@ -116,26 +116,37 @@ def onlyDownloadAndUploadCompleted(operations:List[Operation]): List[Operation] 
         val AR       = nodexs.size
         val selectedNodes = (0 until rf).toList.map(i => (i + (total % AR))%AR )
         selectedNodes.map(nodexs.values.toList.sortBy(_.nodeId))
+          .map(n=> Operations.updateNodeX(n,objectSize = objectSize))
+
       case "SORTING_UF" =>
         nodexs.values.toList.sortBy(_.ufs.diskUF).take(rf)
+        .map(n=> Operations.updateNodeX(n,objectSize = objectSize))
     }
   }
 
   def updateNodeX(nodeX: NodeX,objectSize:Long)={
-    val usedStorageCapacity = nodeX.usedStorageCapacity + objectSize
-    val usedMemoryCapacity = nodeX.usedMemoryCapacity + objectSize
-    val availableStorageCapacity = nodeX.availableStorageCapacity - objectSize
-    val availableMemoryCapacity = nodeX.availableMemoryCapacity - objectSize
+    val usedStorageCapacity      = nodeX.usedStorageCapacity + objectSize
+//    println(usedStorageCapacity,nodeX.usedStorageCapacity)
+    val usedMemoryCapacity       = nodeX.usedMemoryCapacity + objectSize
+    val availableStorageCapacity = nodeX.totalStorageCapacity - usedStorageCapacity
+    val availableMemoryCapacity  = nodeX.totalMemoryCapacity - usedMemoryCapacity
       nodeX.copy(
         usedStorageCapacity = usedStorageCapacity,
         usedMemoryCapacity = usedMemoryCapacity,
         availableStorageCapacity = availableStorageCapacity,
         availableMemoryCapacity = availableMemoryCapacity,
         ufs =  nodeX.ufs.copy(
-          diskUF = nondeterministic.utils.calculateUF(total = nodeX.totalStorageCapacity,used = usedStorageCapacity,objectSize = objectSize),
-          memoryUF = nondeterministic.utils.calculateUF(total = nodeX.totalMemoryCapacity,used = usedMemoryCapacity,objectSize = objectSize)
+          diskUF = nondeterministic.utils.calculateUF(
+            total = nodeX.totalStorageCapacity,
+            used = nodeX.usedStorageCapacity,
+            objectSize = objectSize
+          ),
+          memoryUF = nondeterministic.utils.calculateUF(
+            total = nodeX.totalMemoryCapacity,
+            used = nodeX.usedMemoryCapacity,
+            objectSize = objectSize
+          )
         )
-
     )
   }
 
