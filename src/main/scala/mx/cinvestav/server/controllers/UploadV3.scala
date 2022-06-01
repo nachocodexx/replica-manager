@@ -224,7 +224,13 @@ object UploadV3 {
       }
       newOps                <- rss.traverse(rs=>Operations.processRSAndUpdateQueue(clientId = clientId)( rs = rs)).map(_.flatten)
       serviceTime        <- IO.monotonic.map(_.toNanos - arrivalTime)
-      response           <- Ok()
+      id                 = utils.generateNodeId(prefix = "op",autoId=true)
+      uploadRes          = UploadBalance(
+        id = id,
+        result = Nil,
+        serviceTime = serviceTime
+      )
+      response           <- Ok(uploadRes.asJson)
       _                  <- s.release
     } yield response
       app.onError{ e=>

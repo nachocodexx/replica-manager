@@ -93,11 +93,11 @@ class RaaCSpect extends munit .CatsEffectSuite {
 
 
 
-    def launchOps(xs:Map[String,List[Operation]])(implicit ctx:NodeContext) = {
+    def generateUploadBalance(xs:Map[String,List[Operation]])(implicit ctx:NodeContext) = {
        for  {
-          currentState <- ctx.state.get
-          pendingOps   = currentState.pendingQueue
-         nodeIds       = xs.keys.toList
+         currentState         <- ctx.state.get
+         operations           = currentState.completedOperations
+         avgServiceTimeByNode = Operations.getAVGServiceTime(operations = operations)
        } yield ()
     }
 
