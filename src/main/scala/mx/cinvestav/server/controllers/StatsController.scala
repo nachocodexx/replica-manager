@@ -33,6 +33,7 @@ object StatsController {
         events             = Events.orderAndFilterEventsMonotonicV2(events = rawEvents)
         nodesQueue         = currentState.nodeQueue
         operations         = currentState .operations
+        completedQueues    = currentState.completedQueue
         ars                = EventXOps.getAllNodeXs(events=events).map { node =>
               val nodeId = node.nodeId
               val publicPort = Events.getPublicPort(events= events,nodeId).map(_.publicPort).getOrElse(6666)
@@ -40,21 +41,21 @@ object StatsController {
               metadata = node.metadata ++ Map("PUBLIC_PORT"->publicPort.toString)
             )
         }
-        distributionSchema = Events.generateDistributionSchemaV2(events = events,ctx.config.replicationTechnique)
-        objectsIds         = Events.getObjectIds(events = events)
-        hitCounter         = Events.getHitCounterByNode(events = events)
-        hitRatioInfo       = Events.getGlobalHitRatio(events=events)
+//        distributionSchema = Events.generateDistributionSchemaV2(events = events,ctx.config.replicationTechnique)
+//        objectsIds         = Events.getObjectIds(events = events)
+//        hitCounter         = Events.getHitCounterByNode(events = events)
+//        hitRatioInfo       = Events.getGlobalHitRatio(events=events)
 //        tempMatrix         = Events.generateTemperatureMatrixV2(events = events,windowTime = 0)
 //        tempMatrix0        = Events.generateTemperatureMatrixV3(events = events,windowTime = 0)
-        replicaUtilization = Events.generateReplicaUtilizationMap(events =events)
+//        replicaUtilization = Events.generateReplicaUtilizationMap(events =events)
         nodeIds            = Events.getNodeIds(events = events)
         arsJson            =  ars.map(x=>x.nodeId->x)
           .toMap
           .asJson
 //      ______________________________________________________________________________________________________________________________________________
-        pendingPuts        = EventXOps.onlyPendingPuts(events = events)
-        pendingGets        = EventXOps.onlyPendingGets(events = events)
-        pendingNodes       = (pendingPuts.map(_.nodeId) ++ pendingGets.map(_.nodeId)).distinct
+//        pendingPuts        = EventXOps.onlyPendingPuts(events = events)
+//        pendingGets        = EventXOps.onlyPendingGets(events = events)
+//        pendingNodes       = (pendingPuts.map(_.nodeId) ++ pendingGets.map(_.nodeId)).distinct
 
         _ <- IO.unit
         stats              = Map(
@@ -63,19 +64,20 @@ object StatsController {
 //          "ipAddress" -> currentState.ip.asJson,
           "nodes" -> Operations.processNodes(currentState.nodes,operations).toMap.asJson,
 //          "availableResources" ->arsJson,
-          "distributionSchema" -> distributionSchema.asJson,
+//          "distributionSchema" -> distributionSchema.asJson,
           "objectIds" -> objectsIds.sorted.asJson,
           "nodeIds" -> nodeIds.asJson,
-          "hitCounterByNode"-> hitCounter.asJson,
-          "replicaUtilization" -> replicaUtilization.toArray.asJson,
-          "hitInfo" -> hitRatioInfo.asJson,
+//          "hitCounterByNode"-> hitCounter.asJson,
+//          "replicaUtilization" -> replicaUtilization.toArray.asJson,
+//          "hitInfo" -> hitRatioInfo.asJson,
           "loadBalancing" -> Json.obj(
             "download" -> currentState.downloadBalancerToken.asJson,
             "upload" -> currentState.uploadBalancerToken.asJson
           ),
           "apiVersion" -> ctx.config.apiVersion.asJson,
           "queues" -> nodesQueue.asJson,
-          "operations" -> operations.asJson
+//          "operations" -> operations.asJson,
+          "completedQueues" -> completedQueues.asJson,
 
         )
         response <- Ok(stats)

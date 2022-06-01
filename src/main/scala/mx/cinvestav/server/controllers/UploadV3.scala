@@ -204,6 +204,8 @@ object UploadV3 {
       val app = for {
 //    _____________________________________________________________________
       _                  <- s.acquire
+      headers            = req.headers
+      clientId           = headers.get(CIString("Client-Id")).map(_.head.value).getOrElse("CLIENT_ID")
       arrivalTime        <- IO.monotonic.map(_.toNanos)
       payload            <- req.as[UploadRequest]
 //    __________________________________________________________________________________________________________________
@@ -214,11 +216,13 @@ object UploadV3 {
       ar                 = nodexs.size
 //    __________________________________________________________________________________________________________________
       _                  <- ctx.logger.debug(avgServiceTimes.asJson.toString)
-      x                  = Operations.processUploadRequest(operations = currentState.operations)(ur = payload,nodexs = nodexs)
+      (nodes,rss)        = Operations.processUploadRequest(operations = currentState.operations)(ur = payload,nodexs = nodexs)
       _                  <- ctx.state.update{ s=>
-        s.copy(nodes = x._1)
+        s.copy(
+          nodes = nodes
+        )
       }
-      _                  <- ctx.logger.debug(x._2.toString)
+      newOps                <- rss.traverse(rs=>Operations.processRSAndUpdateQueue(clientId = clientId)( rs = rs)).map(_.flatten)
       serviceTime        <- IO.monotonic.map(_.toNanos - arrivalTime)
       response           <- Ok()
       _                  <- s.release

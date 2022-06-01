@@ -1,7 +1,12 @@
 package mx.cinvestav.operations
 
-import mx.cinvestav.commons.types.{CompletedOperation, Download, DownloadCompleted, How, NodeUFs, NodeX, Operation, ReplicationProcess, ReplicationSchema, Upload, UploadCompleted, UploadRequest}
+import cats.implicits._
+import cats.effect._
+//
+import mx.cinvestav.Declarations.NodeContext
+import mx.cinvestav.commons.types.{Download, DownloadCompleted, How, NodeUFs, NodeX, Operation, ReplicationProcess, ReplicationSchema, Upload, UploadCompleted, UploadRequest,CompletedOperation}
 import mx.cinvestav.commons.balancer.nondeterministic
+import mx.cinvestav.commons.utils
 
 object Operations {
   def onlyUpload(operations:List[Operation]): List[Operation] = operations.filter {
@@ -169,6 +174,59 @@ object Operations {
     }
     xx
   }
+
+
+  def processRSAndUpdateQueue(clientId:String)(rs:ReplicationSchema)(implicit ctx:NodeContext) = {
+    rs.data.toList.traverse{
+      case (nodeId, rp) =>
+        for {
+          _              <- IO.unit
+          what           = rp.what
+          where          = rp.where
+          whereCompleted = where :+ nodeId
+          operations     <- what.traverse{ w=>
+            val opId     = utils.generateNodeId(prefix = "op",autoId = true)
+            for {
+              arrivalTime  <- IO.monotonic.map(_.toNanos)
+              currentState <- ctx.state.get
+              queue        = currentState.nodeQueue
+              objectSize   = w.metadata.get("OBJECT_SIZE").flatMap(_.toLongOption).getOrElse(0L)
+              up           = Upload(
+                operationId = opId,
+                serialNumber = -1,
+                arrivalTime =arrivalTime ,
+                objectId = w.id,
+                objectSize = objectSize,
+                clientId = clientId,
+                nodeId = "NODE_ID",
+                metadata = Map.empty[String,String]
+              )
+              ops          = whereCompleted.foldLeft( (queue,List.empty[Operation]) ){
+                case (x,n)=>
+                  val queues = x._1
+                  val q = queues.getOrElse(n,Nil)
+                  val completed = currentState.completedQueue.getOrElse(n,Nil)
+                  val op = up.copy(serialNumber = q.length+completed.length,nodeId = n)
+                  (
+                    queues.updated(n,q :+ op),
+                    x._2:+op
+                  )
+              }
+              _            <- ctx.state.update{ s=>
+                s.copy(nodeQueue =  ops._1)
+              }
+            } yield ops._2
+          }.map(_.flatten)
+        } yield operations
+    }.map(_.flatten)
+  }
+
+  def distributionSchema(completedOperations:List[CompletedOperation]): Map[String, List[String]] = {
+    completedOperations.groupBy(_.objectId).map{
+      case (oId,cOps) => oId -> cOps.map(_.nodeId)
+    }
+  }
+
   //
   //  def processUploadRequest()(ur: UploadRequest,nodexs:Map[String,NodeX]) = {
 //    val xx = ur.what.foldLeft((nodexs,List.empty[ReplicationSchema])) {

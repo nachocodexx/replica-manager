@@ -102,6 +102,7 @@ class RaaCSpect extends munit .CatsEffectSuite {
     }
 
     def processRS(clientId:String)(rs:ReplicationSchema )(implicit ctx:NodeContext) = {
+
       rs.data.toList.traverse{
         case (nodeId, rp) =>
           for {
