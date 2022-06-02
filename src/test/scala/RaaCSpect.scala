@@ -1,6 +1,6 @@
-import mx.cinvestav.commons.types.{How, NodeUFs, NodeX, Operation, ReplicationProcess, ReplicationSchema, Upload, UploadBalance, UploadCompleted, UploadRequest, What}
+import mx.cinvestav.commons.types.{How, NodeQueueStats, NodeUFs, NodeX, Operation, ReplicationProcess, ReplicationSchema, Upload, UploadBalance, UploadCompleted, UploadRequest, UploadResult, What}
 import mx.cinvestav.operations.Operations
-import mx.cinvestav.commons.utils
+import mx.cinvestav.commons.{types, utils}
 import cats.implicits._
 import cats.effect._
 import fs2.concurrent.SignallingRef
@@ -93,12 +93,39 @@ class RaaCSpect extends munit .CatsEffectSuite {
 
 
 
-    def generateUploadBalance(xs:Map[String,List[Operation]])(implicit ctx:NodeContext) = {
+    def generateUploadBalance(xs:Map[String,List[Operation]])(implicit ctx:NodeContext):IO[UploadBalance] = {
        for  {
          currentState         <- ctx.state.get
          operations           = currentState.completedOperations
+         mergeOps             = xs.values.flatten
+         groupedByOId         = mergeOps.filter {
+           case _:types.Download => true
+           case _:Upload => true
+           case _ => false
+         }.groupBy {
+           case d:types.Download => d.objectId
+           case u:Upload => u.objectId
+           case _ => ""
+         }
          avgServiceTimeByNode = Operations.getAVGServiceTime(operations = operations)
-       } yield ()
+         avgWaitingTimeByNode = Operations.getAVGWaitingTime(operations = operations)
+         id                   = utils.generateNodeId(prefix = "ub",len = 10,autoId = true)
+         xxs = groupedByOId.map{
+           case (objectId, value) =>
+             val id     = utils.generateNodeId(prefix = "us",len = 10,autoId = true)
+             val nodeq  = value.map{ x=>
+               NodeQueueStats(operationId =x.operationId , nodeId = x.nodeId,
+                 avgServiceTime = avgServiceTimeByNode.getOrElse(x.nodeId,Double.MaxValue),
+                 avgWaitingTime = avgWaitingTimeByNode.getOrElse(x.nodeId,Double.MaxValue),
+                 queuePosition = x.serialNumber
+               )
+             }.toList
+             val correlationId = value.map(_.correlationId).headOption.getOrElse("CORRELATION_ID")
+
+             objectId -> UploadResult(id = correlationId, results = nodeq)
+         }
+         res                  = UploadBalance(id = id, result = xxs, serviceTime = 0)
+       } yield res
     }
 
     def processRS(clientId:String)(rs:ReplicationSchema )(implicit ctx:NodeContext) = {
@@ -111,28 +138,30 @@ class RaaCSpect extends munit .CatsEffectSuite {
             where          = rp.where
             whereCompleted = where :+ nodeId
             operations     <- what.traverse{ w=>
-              val opId     = utils.generateNodeId(prefix = "op",autoId = true)
+              val correlationId     = utils.generateNodeId(prefix = "op",len=10,autoId = true)
               for {
                 arrivalTime  <- IO.monotonic.map(_.toNanos)
                 currentState <- ctx.state.get
                 queue        = currentState.nodeQueue
                 objectSize   = w.metadata.get("OBJECT_SIZE").flatMap(_.toLongOption).getOrElse(0L)
                 up           = Upload(
-                  operationId = opId,
+                  operationId = "OPERATION_ID",
                   serialNumber = -1,
                   arrivalTime =arrivalTime ,
                   objectId = w.id,
                   objectSize = objectSize,
                   clientId = clientId,
                   nodeId = "NODE_ID",
-                  metadata = Map.empty[String,String]
+                  metadata = Map.empty[String,String],
+                  correlationId = correlationId
                 )
                 ops          = whereCompleted.foldLeft( (queue,List.empty[Operation]) ){
                   case (x,n)=>
                     val queues = x._1
                     val q = queues.getOrElse(n,Nil)
                     val completed = currentState.completedQueue.getOrElse(n,Nil)
-                    val op = up.copy(serialNumber = q.length+completed.length,nodeId = n)
+                    val opId     = utils.generateNodeId(prefix = "op",len=10,autoId = true)
+                    val op = up.copy(serialNumber = q.length+completed.length,nodeId = n,operationId = opId)
                     (
                       queues.updated(n,q :+ op),
                       x._2:+op
@@ -155,8 +184,14 @@ class RaaCSpect extends munit .CatsEffectSuite {
       state       <-  IO.ref(NodeState(
         completedQueue = Map(
           "sn-0"-> List(
-            UploadCompleted.empty,
+            UploadCompleted.empty.copy(serviceTime = 100,waitingTime = 0,nodeId = "sn-0"),
+            UploadCompleted.empty.copy(serviceTime = 100,waitingTime = 0,nodeId = "sn-0"),
+            UploadCompleted.empty.copy(serviceTime = 100,waitingTime = 0,nodeId= "sn-0"),
           )
+        ),completedOperations = List(
+          UploadCompleted.empty.copy(serviceTime = 30,waitingTime = 0,nodeId = "sn-0"),
+          UploadCompleted.empty.copy(serviceTime = 50,waitingTime = 0,nodeId = "sn-0"),
+          UploadCompleted.empty.copy(serviceTime = 100,waitingTime = 0,nodeId= "sn-0"),
         )
       ))
       (client,fx) <- BlazeClientBuilder[IO](executionContext = ExecutionContext.global).resource.allocated
@@ -185,11 +220,13 @@ class RaaCSpect extends munit .CatsEffectSuite {
         case (nId,ops)=> nId -> ops.sortBy(_.serialNumber)
       }
 
-      _            <- IO.println(xsGrouped.asJson.toString)
+      x <- generateUploadBalance(xs = xsGrouped)
+      _            <- IO.println(x.asJson.toString)
+//      _            <- IO.println(xsGrouped.asJson.toString)
       
 //    ____________________________________
       currentState <- ctx.state.get
-      _            <- IO.println(currentState.nodeQueue.asJson.toString)
+//      _            <- IO.println(currentState.nodeQueue.asJson.toString)
     } yield ()
   }
 

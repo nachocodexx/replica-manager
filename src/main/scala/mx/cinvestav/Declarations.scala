@@ -5,7 +5,7 @@ import cats.effect.std.Semaphore
 import cats.effect.{FiberIO, IO, Ref}
 import mx.cinvestav.commons.status.Status
 import mx.cinvestav.config.DefaultConfig
-import mx.cinvestav.commons.types.{CompletedOperation, Download, NodeX, Operation, PendingReplication, Upload, UploadHeaders}
+import mx.cinvestav.commons.types.{CompletedOperation, Download, NodeX, Operation, PendingReplication, Upload, UploadHeaders,DownloadCompleted,UploadCompleted}
 import mx.cinvestav.commons.events.{AddedNode, Del, Downloaded, EventX, Evicted, Get, GetCompleted, Missed, ObjectHashing, Push, Put, PutCompleted, RemovedNode, Replicated, UpdatedNodePort, Uploaded, Pull => PullEvent, TransferredTemperature => SetDownloads}
 import mx.cinvestav.events.Events.{GetInProgress, HotObject, MeasuredServiceTime, MonitoringStats, UpdatedNetworkCfg}
 import org.http4s.Headers
@@ -89,6 +89,11 @@ object Declarations {
     implicit val operationEncoder:Encoder[Operation] = {
       case d: Download => d.asJson
       case u: Upload => u.asJson
+      case _ => Json.Null
+    }
+    implicit val completedOperationEncoder:Encoder[CompletedOperation] = {
+      case d: DownloadCompleted => d.asJson
+      case u: UploadCompleted => u.asJson
       case _ => Json.Null
     }
   }

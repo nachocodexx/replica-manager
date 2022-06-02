@@ -24,9 +24,11 @@ object StatsController {
   def apply()(implicit ctx:NodeContext): HttpRoutes[IO] = {
 
     HttpRoutes.of[IO]{
-      case GET -> Root / "stats" =>
+      case req@GET -> Root / "stats" =>
         val program = for {
         _                  <- IO.unit
+        headers    = req.headers
+        technique    = headers.get(CIString("Replication-Technique")).map(_.head.value).getOrElse(ctx.config.replicationTechnique)
         currentState       <- ctx.state.get
         pendingReplicas    = currentState.pendingReplicas.filter(_._2.rf>0)
         rawEvents          = currentState.events
@@ -41,43 +43,29 @@ object StatsController {
               metadata = node.metadata ++ Map("PUBLIC_PORT"->publicPort.toString)
             )
         }
-//        distributionSchema = Events.generateDistributionSchemaV2(events = events,ctx.config.replicationTechnique)
-//        objectsIds         = Events.getObjectIds(events = events)
-//        hitCounter         = Events.getHitCounterByNode(events = events)
-//        hitRatioInfo       = Events.getGlobalHitRatio(events=events)
-//        tempMatrix         = Events.generateTemperatureMatrixV2(events = events,windowTime = 0)
-//        tempMatrix0        = Events.generateTemperatureMatrixV3(events = events,windowTime = 0)
-//        replicaUtilization = Events.generateReplicaUtilizationMap(events =events)
+        ds = Operations.distributionSchema(
+          operations = currentState.operations,
+          completedOperations = currentState.completedOperations,
+          technique = technique
+        )
         nodeIds            = Events.getNodeIds(events = events)
-        arsJson            =  ars.map(x=>x.nodeId->x)
-          .toMap
-          .asJson
-//      ______________________________________________________________________________________________________________________________________________
-//        pendingPuts        = EventXOps.onlyPendingPuts(events = events)
-//        pendingGets        = EventXOps.onlyPendingGets(events = events)
-//        pendingNodes       = (pendingPuts.map(_.nodeId) ++ pendingGets.map(_.nodeId)).distinct
 
+        avgServiceTime = Operations.getAVGServiceTime(operations = currentState.completedOperations)
         _ <- IO.unit
         stats              = Map(
           "nodeId" -> ctx.config.nodeId.asJson,
           "port"  -> ctx.config.port.asJson,
-//          "ipAddress" -> currentState.ip.asJson,
-          "nodes" -> Operations.processNodes(currentState.nodes,operations).toMap.asJson,
-//          "availableResources" ->arsJson,
-//          "distributionSchema" -> distributionSchema.asJson,
-          "objectIds" -> objectsIds.sorted.asJson,
+          "nodes" -> Operations.processNodes(currentState.nodes,operations,completedOperations = currentState.completedOperations,queue = nodesQueue ).toMap.asJson,
           "nodeIds" -> nodeIds.asJson,
-//          "hitCounterByNode"-> hitCounter.asJson,
-//          "replicaUtilization" -> replicaUtilization.toArray.asJson,
-//          "hitInfo" -> hitRatioInfo.asJson,
           "loadBalancing" -> Json.obj(
             "download" -> currentState.downloadBalancerToken.asJson,
             "upload" -> currentState.uploadBalancerToken.asJson
           ),
           "apiVersion" -> ctx.config.apiVersion.asJson,
           "queues" -> nodesQueue.asJson,
-//          "operations" -> operations.asJson,
           "completedQueues" -> completedQueues.asJson,
+          "avgServiceTime" -> avgServiceTime.asJson,
+          "distributionSchema" -> ds.asJson
 
         )
         response <- Ok(stats)
