@@ -147,7 +147,6 @@ class RaaCSpect extends munit .CatsEffectSuite {
       ur                          = UploadRequest(
         what = List(
           What(id = "f1", url = "", metadata = Map("OBJECT_SIZE"->"10", "REPLICATION_FACTOR"-> "3")  ),
-//          What(id = "f2", url = "", metadata = Map("OBJECT_SIZE"->"10", "REPLICATION_FACTOR"-> "3")  )
         ),
         elastic = true
       )
@@ -168,7 +167,8 @@ class RaaCSpect extends munit .CatsEffectSuite {
         case (nId,ops)=> nId -> ops.sortBy(_.serialNumber)
       }
       x               <- Operations.generateUploadBalance(xs = xsGrouped)
-      _               <- IO.println(newNodexs.asJson.toString)
+//      _               <- IO.println(newNodexs.asJson.toString)
+      _ <- IO.println(rss.asJson.toString)
 //    ____________________________________
       currentState <- ctx.state.get
       _ <- fx

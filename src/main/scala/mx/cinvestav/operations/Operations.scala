@@ -130,6 +130,7 @@ object Operations {
       case "MIN_WAITING_TIME"  =>
         val defaultWtXNode   = nodexs.keys.toList.map(_ -> 0.0).toMap
         val waitingTimeXNode =  (defaultWtXNode ++ Operations.getAVGWaitingTimeNodeIdXCOps(completedQueue)).toList.sortBy(_._2)
+        println(waitingTimeXNode)
         waitingTimeXNode.take(rf).map(_._1).map(nodexs).map(n=>Operations.updateNodeX(nodeX = n , objectSize = objectSize, downloadDiv =0L))
       case "ROUND_ROBIN" =>
         val grouped  = onlyUpload(operations).asInstanceOf[List[Upload]].groupBy(_.nodeId)
@@ -223,7 +224,7 @@ object Operations {
           queue = queue,
           completedQueue = completedQueue
         )
-        println(selectedNodes)
+//        println(selectedNodes)
 //        val xs = selectedNodes
         //          val xs            = selectedNodes.map(n => Operations.updateNodeX(n, objectSize))
         val y             = selectedNodes.foldLeft(ns) { case (xx, n) => xx.updated(n.nodeId, n)}

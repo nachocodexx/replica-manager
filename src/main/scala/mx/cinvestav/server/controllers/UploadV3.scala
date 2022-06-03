@@ -47,6 +47,13 @@ object UploadV3 {
     else IO.pure(List.empty[String])
   }
 
+  def sendRP(rp:Map[String,ReplicationProcess])(implicit ctx:NodeContext) = {
+    for{
+      _ <- IO.unit
+    } yield ()
+  }
+
+
   def apply(s:Semaphore[IO])(implicit ctx:NodeContext) = HttpRoutes.of[IO]{
 
     case req@GET -> Root / "upload" =>
@@ -55,8 +62,10 @@ object UploadV3 {
       _                  <- s.acquire
       headers            = req.headers
       clientId           = headers.get(CIString("Client-Id")).map(_.head.value).getOrElse("CLIENT_ID")
+      technique          = headers.get(CIString("Replication-Technique")).map(_.head.value).getOrElse(ctx.config.replicationTechnique)
       arrivalTime        <- IO.monotonic.map(_.toNanos)
       payload            <- req.as[UploadRequest]
+
       newNodes           <- elasticity(payload)
 //    __________________________________________________________________________________________________________________
       currentState       <- ctx.state.get
@@ -64,9 +73,12 @@ object UploadV3 {
       avgServiceTimes    = Operations.getAVGServiceTime(operations= currentState.completedOperations)
       nodexs             = currentState.nodes
       ar                 = nodexs.size
+//      ds                 = Operations.distributionSchema(operations = Nil,completedOperations = currentState.completedOperations,queue = nodesQueue,technique =technique)
+
 //    __________________________________________________________________________________________________________________
       _                  <- ctx.logger.debug(avgServiceTimes.asJson.toString)
       (nodes,rss)        = Operations.processUploadRequest(operations = currentState.operations)(ur = payload,nodexs = nodexs)
+//
       _                  <- ctx.state.update{ s=>
         s.copy(
           nodes = nodes
@@ -78,12 +90,17 @@ object UploadV3 {
         case (nId,ops)=> nId -> ops.sortBy(_.serialNumber)
       }
 
-//       <-
       serviceTime        <- IO.monotonic.map(_.toNanos - arrivalTime)
       id                 = utils.generateNodeId(prefix = "op",autoId=true)
       uploadRes          <- Operations.generateUploadBalance(xs = xsGrouped).map(_.copy(serviceTime = serviceTime,id=id))
       response           <- Ok(uploadRes.asJson)
       _                  <- s.release
+      _ <- rss.traverse{ rs =>
+        rs.data.headOption match {
+          case Some(value) => ???
+          case None => IO.unit
+        }
+      }
     } yield response
       app.onError{ e=>
         ctx.logger.error(e.getMessage)
