@@ -52,11 +52,10 @@ object Operations {
 //    }
 //  }
 
-  def getAVGServiceTime(operations:List[CompletedOperation]): Map[String, Double] = {
-//    val upAndDownC = onlyDownloadAndUploadCompleted(operations = operations).groupBy(_.nodeId)
-    operations.groupBy(_.nodeId).map{
+  def getAVGServiceTimeNodeIdXCOps(xs:Map[String,List[CompletedOperation]]) = {
+    xs.map{
       case (nodeId,xs)=> nodeId ->  {
-       val x=  xs.map{
+        val x=  xs.map{
           case dc:DownloadCompleted => dc.serviceTime
           case dc:UploadCompleted => dc.serviceTime
           case _ => Long.MaxValue
@@ -65,9 +64,13 @@ object Operations {
       }
     }
   }
-  def getAVGWaitingTime(operations:List[CompletedOperation]): Map[String, Double] = {
-    //    val upAndDownC = onlyDownloadAndUploadCompleted(operations = operations).groupBy(_.nodeId)
-    operations.groupBy(_.nodeId).map{
+  def getAVGServiceTime(operations:List[CompletedOperation]): Map[String, Double] =
+    Operations.getAVGServiceTimeNodeIdXCOps(operations.groupBy(_.nodeId))
+
+
+
+  def getAVGWaitingTimeNodeIdXCOps(xs:Map[String,List[CompletedOperation]]): Map[String, Double] = {
+    xs.map{
       case (nodeId,xs)=> nodeId ->  {
         val x=  xs.map{
           case dc:DownloadCompleted => dc.waitingTime
@@ -77,32 +80,26 @@ object Operations {
         if(x.isEmpty) Long.MaxValue else x.sum.toDouble/x.length.toDouble
       }
     }
+
   }
-//  def getWaitingTimeBySerialNumber(operations:List[CompletedOperation],serialNumber:Int) = {
-//    onlyDownloadAndUploadCompleted(operations = operations).find(_.serialNumber == serialNumber) match {
-//      case Some(value) => value match {
-//        case DownloadCompleted(operationId, serialNumber, arrivalTime, serviceTime, waitingTime,idleTime, objectId, nodeId, metadata) => waitingTime
-//        case UploadCompleted(operationId, serialNumber, arrivalTime, serviceTime, waitingTime,idleTime,objectId, nodeId, metadata) => waitingTime
-//        case _ => 0
-//      }
-//      case None => 0
-//    }
-//  }
+  def getAVGWaitingTime(operations:List[CompletedOperation]): Map[String, Double] = {
+    Operations.getAVGWaitingTimeNodeIdXCOps(operations.groupBy(_.nodeId))
+  }
 
 
-  def processNodes(nodexs:Map[String,NodeX],operations:List[Operation],completedOperations:List[CompletedOperation],queue:Map[String,List[Operation]],objectSize:Long=0L)  = {
+  def processNodes(nodexs:Map[String,NodeX],completedOperations:List[CompletedOperation],queue:Map[String,List[Operation]],objectSize:Long=0L)  = {
     nodexs.map{
       case (nodeId,n) =>
-//        val upCompletedIds = upCompleted.map(_.nodeId)
-        val q             = queue.get(nodeId)
-        val upCompleted   = onlyUploadCompleted(completedOperations = completedOperations).filter(_.nodeId == nodeId)
-        val upPending     = q.map(ops => onlyUpload(operations = ops)).getOrElse(Nil).length
-        val dCompleted    = onlyDownloadCompleted(operations = completedOperations)
-        val dPending      = q.map(ops => onlyDownload(operations = ops)).getOrElse(Nil).length
-        val uploads       = onlyUpload(operations = operations).asInstanceOf[List[Upload]]
-        val used          = uploads.map(_.objectSize).sum
-        val downloads     = onlyDownload(operations = operations).asInstanceOf[List[Download]]
-        val usedD         = downloads.map(_.objectSize).sum
+        val ops              = queue.getOrElse(nodeId,List.empty[Operation])
+        val upCompleted      = onlyUploadCompleted(completedOperations = completedOperations).filter(_.nodeId == nodeId).asInstanceOf[List[UploadCompleted]]
+        val enqueuedUploads   = onlyUpload(operations = ops).asInstanceOf[List[Upload]]
+        val upPending         = enqueuedUploads.length
+        val dCompleted        = onlyDownloadCompleted(operations = completedOperations).filter(_.nodeId == nodeId).asInstanceOf[List[DownloadCompleted]]
+        val enqueuedDownloads = onlyDownload(operations = ops).asInstanceOf[List[Download]]
+        val dPending          = enqueuedDownloads.length
+//
+        val used  =  enqueuedUploads.map(_.objectSize).sum + upCompleted.map(_.objectSize).sum
+        val usedD = enqueuedDownloads.map(_.objectSize).sum + dCompleted.map(_.objectSize).sum
       n.copy(
           availableStorageCapacity  = n.totalStorageCapacity - used,
           usedMemoryCapacity        = usedD,
@@ -122,10 +119,48 @@ object Operations {
         )
     }.map(n=> n.nodeId -> n)
   }
-  def uploadBalance(x:String,nodexs:Map[String,NodeX])(operations:List[Operation],objectSize:Long,rf:Int = 1) = {
+//  __________________________________________________________________
+  def uploadBalance(x:String,nodexs:Map[String,NodeX])(
+    operations:List[Operation] = Nil,
+    queue:Map[String,List[Operation]] = Map.empty[String,List[Operation]],
+    completedQueue:Map[String,List[CompletedOperation]] = Map.empty[String,List[CompletedOperation]],
+    objectSize:Long,rf:Int = 1
+) = {
     x match {
+      case "MIN_WAITING_TIME"  =>
+        val defaultWtXNode   = nodexs.keys.toList.map(_ -> 0.0).toMap
+        val waitingTimeXNode =  (defaultWtXNode ++ Operations.getAVGWaitingTimeNodeIdXCOps(completedQueue)).toList.sortBy(_._2)
+        waitingTimeXNode.take(rf).map(_._1).map(nodexs).map(n=>Operations.updateNodeX(nodeX = n , objectSize = objectSize, downloadDiv =0L))
       case "ROUND_ROBIN" =>
         val grouped  = onlyUpload(operations).asInstanceOf[List[Upload]].groupBy(_.nodeId)
+//        println(grouped)
+        val xs       = grouped.map(x=> x._1 -> x._2.length)
+        val total    = xs.values.toList.sum
+        val AR       = nodexs.size
+        val selectedNodes = (0 until rf).toList.map(i => (i + (total % AR))%AR )
+        val sortedNodes = nodexs.values.toList.sortBy(_.nodeId)
+        selectedNodes.map(sortedNodes)
+          .map(n=> Operations.updateNodeX(n,objectSize = objectSize,downloadDiv = 0L))
+
+      case "SORTING_UF" =>
+        nodexs.values.toList.sortBy(_.ufs.diskUF).take(rf)
+        .map(n=> Operations.updateNodeX(n,objectSize = objectSize,downloadDiv = 0L))
+    }
+  }
+  def downloadBalance(x:String,nodexs:Map[String,NodeX])(
+    operations:List[Operation] = Nil,
+    queue:Map[String,List[Operation]] = Map.empty[String,List[Operation]],
+    completedQueue:Map[String,List[CompletedOperation]] = Map.empty[String,List[CompletedOperation]],
+    objectSize:Long,
+    rf:Int = 1
+  ) = {
+    x match {
+      case "MIN_WAITING_TIME"  =>
+        val defaultWtXNode   = nodexs.keys.toList.map(_ -> 0.0).toMap
+        val waitingTimeXNode =  (defaultWtXNode ++ Operations.getAVGWaitingTimeNodeIdXCOps(completedQueue)).toList.sortBy(_._2)
+        waitingTimeXNode.take(rf).map(_._1).map(nodexs).map(n=>Operations.updateNodeX(nodeX = n , objectSize = objectSize, uploadDiv =0L))
+      case "ROUND_ROBIN" =>
+        val grouped  = onlyDownload(operations).asInstanceOf[List[Download]].groupBy(_.nodeId)
         val xs       = grouped.map(x=> x._1 -> x._2.length)
         val total    = xs.values.toList.sum
         val AR       = nodexs.size
@@ -134,18 +169,22 @@ object Operations {
           .map(n=> Operations.updateNodeX(n,objectSize = objectSize))
 
       case "SORTING_UF" =>
-        nodexs.values.toList.sortBy(_.ufs.diskUF).take(rf)
-        .map(n=> Operations.updateNodeX(n,objectSize = objectSize))
+        nodexs.values.toList.sortBy(_.ufs.memoryUF).take(rf)
+          .map(n=> Operations.updateNodeX(n,objectSize = objectSize))
     }
   }
 
-  def updateNodeX(nodeX: NodeX,objectSize:Long)={
-    val usedStorageCapacity      = nodeX.usedStorageCapacity + objectSize
+
+
+
+
+  def updateNodeX(nodeX: NodeX,objectSize:Long, uploadDiv:Long = 1L, downloadDiv:Long = 1L )={
+    val usedStorageCapacity      = nodeX.usedStorageCapacity + (objectSize*uploadDiv)
 //    println(usedStorageCapacity,nodeX.usedStorageCapacity)
-    val usedMemoryCapacity       = nodeX.usedMemoryCapacity + objectSize
+    val usedMemoryCapacity       = nodeX.usedMemoryCapacity + (objectSize*downloadDiv)
     val availableStorageCapacity = nodeX.totalStorageCapacity - usedStorageCapacity
     val availableMemoryCapacity  = nodeX.totalMemoryCapacity - usedMemoryCapacity
-      nodeX.copy(
+    nodeX.copy(
         usedStorageCapacity = usedStorageCapacity,
         usedMemoryCapacity = usedMemoryCapacity,
         availableStorageCapacity = availableStorageCapacity,
@@ -154,30 +193,41 @@ object Operations {
           diskUF = nondeterministic.utils.calculateUF(
             total = nodeX.totalStorageCapacity,
             used = nodeX.usedStorageCapacity,
-            objectSize = objectSize
+            objectSize = objectSize*uploadDiv
           ),
           memoryUF = nondeterministic.utils.calculateUF(
             total = nodeX.totalMemoryCapacity,
             used = nodeX.usedMemoryCapacity,
-            objectSize = objectSize
+            objectSize = objectSize*downloadDiv
           )
         )
     )
   }
 
 
-  def processUploadRequest(lbToken:String="SORTING_UF",operations:List[Operation])(ur: UploadRequest,nodexs:Map[String,NodeX]) = {
+  def processUploadRequest(
+                            lbToken:String="SORTING_UF",
+                            operations:List[Operation],
+                            queue:Map[String,List[Operation]] = Map.empty[String,List[Operation]],
+                            completedQueue:Map[String,List[CompletedOperation]] = Map.empty[String,List[CompletedOperation]]
+                          )(ur: UploadRequest,nodexs:Map[String,NodeX]) = {
     val xx = ur.what.foldLeft((nodexs,List.empty[ReplicationSchema] )) {
       case (x, w) =>
         val ns = x._1
-        val rf = w.metadata.get("REPLICATION_FACTOR").flatMap(_.toIntOption).getOrElse(1)
+        val rf            = w.metadata.get("REPLICATION_FACTOR").flatMap(_.toIntOption).getOrElse(1)
 
         val objectSize    = w.metadata.get("OBJECT_SIZE").flatMap(_.toLongOption).getOrElse(0L)
-        val selectedNodes = Operations.uploadBalance(lbToken, ns)(operations = operations, objectSize = objectSize, rf = rf)
-        val xs = selectedNodes
+        val selectedNodes = Operations.uploadBalance(lbToken, ns)(
+          operations = operations,
+          objectSize = objectSize, rf = rf,
+          queue = queue,
+          completedQueue = completedQueue
+        )
+        println(selectedNodes)
+//        val xs = selectedNodes
         //          val xs            = selectedNodes.map(n => Operations.updateNodeX(n, objectSize))
-        val y             = xs.foldLeft(ns) { case (xx, n) => xx.updated(n.nodeId, n)}
-        val yy            = selectedNodes.map(_.nodeId).map(y)
+        val y             = selectedNodes.foldLeft(ns) { case (xx, n) => xx.updated(n.nodeId, n)}
+        val yy            = selectedNodes.map(_.nodeId).map(y).toList
         val pivotNode     = yy.head
         val where         = yy.tail.map(_.nodeId)
         val rs = ReplicationSchema(
@@ -240,12 +290,13 @@ object Operations {
                           operations:List[Operation],
                           completedOperations: List[CompletedOperation],
                          queue:Map[String,List[Operation]] = Map.empty[String,List[Operation]],technique:String = "ACTIVE") ={
-    val objectIdXNodes = Operations.onlyUpload(operations).asInstanceOf[List[Upload]].groupBy(_.objectId)
+    val objectIdXNodes = Operations.onlyUpload(queue.values.flatten.toList).asInstanceOf[List[Upload]].groupBy(_.objectId)
+//      Operations.onlyUpload(operations).asInstanceOf[List[Upload]].groupBy(_.objectId)
 
     completedOperations.groupBy(_.objectId).map{
         case (oId,cOps) =>
           val pendings = objectIdXNodes.getOrElse(oId,Nil)
-          val partialDs = cOps.map(_.nodeId)
+          val partialDs = cOps.map(_.nodeId).distinct
           technique match {
               case "ACTIVE" =>
                 if(pendings.isEmpty) (oId ->partialDs) else (oId -> Nil)
@@ -299,5 +350,8 @@ object Operations {
       res                  = UploadBalance(id = id, result = xxs, serviceTime = 0)
     } yield res
   }
+
+
+
 
 }

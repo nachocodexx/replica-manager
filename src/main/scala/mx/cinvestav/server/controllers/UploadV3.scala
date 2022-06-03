@@ -12,6 +12,7 @@ import org.http4s.circe.CirceEntityEncoder._
 import org.typelevel.ci.CIString
 import io.circe.syntax._
 import io.circe.generic.auto._
+import mx.cinvestav.commons.types.NodeWhat
 
 //
 import mx.cinvestav.Declarations.NodeContext
@@ -25,6 +26,27 @@ import mx.cinvestav.operations.Operations
 
 object UploadV3 {
 
+  def elasticity(payload:UploadRequest)(implicit ctx:NodeContext) = {
+    if(payload.elastic){
+      val leftNodes = payload.what.map(_.metadata.getOrElse("REPLICATION_FACTOR","1").toInt).max
+      val xs = (0 until leftNodes).toList.traverse{ index=>
+        val x =  if(ctx.config.elasticityTime == "REACTIVE")  {
+          val nrs = NodeReplicationSchema.empty(id = "")
+          val app = ctx.config.systemReplication.createNode(nrs = nrs)
+          app.map(_.nodeId)
+        } else   {
+          val id = utils.generateStorageNodeId(autoId = true)
+          val nrs = NodeReplicationSchema.empty(id =  id)
+          val app = ctx.config.systemReplication.createNode(nrs = nrs)
+          app.start.map(_=> id)
+        }
+        x
+      }
+      xs
+    }
+    else IO.pure(List.empty[String])
+  }
+
   def apply(s:Semaphore[IO])(implicit ctx:NodeContext) = HttpRoutes.of[IO]{
 
     case req@GET -> Root / "upload" =>
@@ -35,6 +57,7 @@ object UploadV3 {
       clientId           = headers.get(CIString("Client-Id")).map(_.head.value).getOrElse("CLIENT_ID")
       arrivalTime        <- IO.monotonic.map(_.toNanos)
       payload            <- req.as[UploadRequest]
+      newNodes           <- elasticity(payload)
 //    __________________________________________________________________________________________________________________
       currentState       <- ctx.state.get
       nodesQueue         = currentState.nodeQueue

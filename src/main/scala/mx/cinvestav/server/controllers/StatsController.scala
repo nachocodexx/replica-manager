@@ -55,7 +55,11 @@ object StatsController {
         stats              = Map(
           "nodeId" -> ctx.config.nodeId.asJson,
           "port"  -> ctx.config.port.asJson,
-          "nodes" -> Operations.processNodes(currentState.nodes,operations,completedOperations = currentState.completedOperations,queue = nodesQueue ).toMap.asJson,
+          "nodes" -> Operations.processNodes(
+            nodexs = currentState.nodes,
+            completedOperations = currentState.completedOperations,
+            queue = nodesQueue
+          ).toMap.asJson,
           "nodeIds" -> nodeIds.asJson,
           "loadBalancing" -> Json.obj(
             "download" -> currentState.downloadBalancerToken.asJson,
@@ -65,7 +69,9 @@ object StatsController {
           "queues" -> nodesQueue.asJson,
           "completedQueues" -> completedQueues.asJson,
           "avgServiceTime" -> avgServiceTime.asJson,
-          "distributionSchema" -> ds.asJson
+          "distributionSchema" -> ds.asJson,
+          "avgWaitingTimesByNode"  -> Operations.getAVGWaitingTimeNodeIdXCOps(currentState.completedQueue).asJson,
+          "avgServiceTimesByNode"  -> Operations.getAVGServiceTimeNodeIdXCOps(currentState.completedQueue).asJson
 
         )
         response <- Ok(stats)
