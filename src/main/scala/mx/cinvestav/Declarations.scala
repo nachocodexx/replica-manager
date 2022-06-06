@@ -147,7 +147,7 @@ object Declarations {
                         completedOperations:List[CompletedOperation] = Nil,
                         lastSerialNumber:Int =0,
                         nodes:Map[String,NodeX] = Map.empty[String,NodeX],
-
+                        readyToDownload:Map[String,List[String]] = Map.empty[String,List[String]],
                         )
   case class NodeContext(
                             config: DefaultConfig,

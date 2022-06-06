@@ -190,19 +190,26 @@ class RaaCSpect extends munit .CatsEffectSuite {
 
   test("R") {
     for {
-      ref <- IO.ref(true)
-      _ <- Stream.awakeEvery[IO](1 second)
+      ref <- IO.ref(false)
+      res <- Stream.awakeEvery[IO](1 second)
         .evalMap{ x =>
           for{
-            _ <- IO.println(s"ATTEMP $x")
-            x = scala.util.Random.nextInt(1000)
-            _ <- IO.println(s"NUMBER $x")
-            _ <- if(x % 5 ) IO.println("END") *> ref.update(x=>true)
-            else IO.unit
+            _   <- IO.println(s"ATTEMP $x")
+            res <- ref.get
+            _   <- if(res) IO.println("END") *> IO.canceled else IO.unit
           } yield ()
         }
-        .compile.start
+        .compile.drain.start
+      _ <- IO.sleep(5 seconds) *> ref.update(_=>true)
+      _ <- IO.println(res.toString)
+      _ <- IO.sleep(5 seconds)
     } yield ()
+  }
+
+  test("L"){
+    val x = Map("a"->List("b"))
+    val y = x |+| Map("a"-> List("c"))
+    println(y)
   }
 
 }

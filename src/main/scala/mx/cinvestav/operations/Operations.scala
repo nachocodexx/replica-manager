@@ -29,24 +29,44 @@ object Operations {
         case (objectId, ops) => objectId -> ops.length
       }
   }
+
+  def download(d:Download)(implicit ctx:NodeContext) = {
+    val req = Request[IO](
+      method = Method.GET,
+      uri = Uri.unsafeFromString(s"http://${d.nodeId}:6666/api/v3/download/${d.objectId}"),
+      headers = Headers(
+        Header.Raw(CIString("Operation-Id"), d.operationId),
+        Header.Raw(CIString("Client-Id"), d.clientId),
+        Header.Raw(CIString("Object-Size"), d.objectSize.toString),
+        Header.Raw(CIString("Serial-Number"), d.serialNumber.toString),
+      )
+    )
+    for {
+      response <- ctx.client.stream(req = req).flatMap(_.body).compile.to(Array)
+      _        <- ctx.logger.debug(response.toString)
+    } yield response
+  }
+
+  def downloadv2(d:Download)(implicit ctx:NodeContext) = {
+    val req = Request[IO](
+      method = Method.GET,
+      uri = Uri.unsafeFromString(s"http://${d.nodeId}:6666/api/v3/download/${d.objectId}"),
+      headers = Headers(
+        Header.Raw(CIString("Operation-Id"), d.operationId),
+        Header.Raw(CIString("Client-Id"), d.clientId),
+        Header.Raw(CIString("Object-Size"), d.objectSize.toString),
+        Header.Raw(CIString("Serial-Number"), d.serialNumber.toString),
+      )
+    )
+    ctx.client.stream(req)
+  }
+
   def launchOperation(op:Operation)(implicit ctx:NodeContext) = {
     val x = op match {
       case d: Download =>
-        val req = Request[IO](
-          method = Method.GET,
-          uri = Uri.unsafeFromString(s"http://${d.nodeId}:6666/api/v3/download/${d.objectId}"),
-          headers = Headers(
-            Header.Raw(CIString("Operation-Id"), d.operationId),
-            Header.Raw(CIString("Client-Id"), d.clientId),
-            Header.Raw(CIString("Object-Size"), d.objectSize.toString),
-            Header.Raw(CIString("Serial-Number"), d.serialNumber.toString),
-          )
-        )
-        for {
-//          response <- ctx.client.status(req = req)
-          response <- ctx.client.stream(req = req).compile.lastOrError
-          _        <- ctx.logger.debug(response.toString)
-        } yield response
+        ctx.state.update{s=>s.copy(readyToDownload = s.readyToDownload |+| Map(d.nodeId -> List(d.operationId) )    )}
+        NoContent()
+
       case u: Upload =>
         val req = Request[IO](
           method = Method.POST,
@@ -276,6 +296,8 @@ object Operations {
     }
   }
 
+//  def
+
   def downloadBalance(x:String,nodexs:Map[String,NodeX])(
     operations:List[Operation] = Nil,
     queue:Map[String,List[Operation]] = Map.empty[String,List[Operation]],
@@ -283,6 +305,8 @@ object Operations {
     objectSize:Long,
   ) = {
     x match {
+      case "LEAST_HITS"=>
+        NodeX.empty(nodeId = "")
       case "MIN_WAITING_TIME"  =>
         val defaultWtXNode   = nodexs.keys.toList.map(_ -> 0.0).toMap
         val waitingTimeXNode =  (defaultWtXNode ++ Operations.getAVGWaitingTimeByNode(
@@ -290,7 +314,6 @@ object Operations {
           queue = queue
         )).toList.minBy(_._2)
         Operations.updateNodeX(nodeX = nodexs(waitingTimeXNode._1),objectSize=objectSize,uploadDiv = 0L)
-//          .map(nodexs).map(n=>Operations.updateNodeX(nodeX = n , objectSize = objectSize, uploadDiv =0L))
       case "ROUND_ROBIN" =>
         val grouped  = onlyDownload(operations).asInstanceOf[List[Download]].groupBy(_.nodeId)
         val xs       = grouped.map(x=> x._1 -> x._2.length)
@@ -300,10 +323,6 @@ object Operations {
         val orderedNodes = (nodexs.values.toList.sortBy(_.nodeId))
         val selectedNode = orderedNodes(index)
         Operations.updateNodeX(selectedNode,objectSize = objectSize)
-//        val selectedNodes = (0 until rf).toList.map(i => (i + (total % AR))%AR )
-//        selectedNodes.map(nodexs.values.toList.sortBy(_.nodeId))
-//          .map(n=> Operations.updateNodeX(n,objectSize = objectSize))
-
       case "SORTING_UF" =>
         Operations.updateNodeX(nodexs.values.toList.minBy(_.ufs.memoryUF),objectSize)
 //          .map(n=> Operations.updateNodeX(n,objectSize = objectSize))

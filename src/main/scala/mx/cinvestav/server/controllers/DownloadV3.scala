@@ -16,10 +16,16 @@ import io.circe.generic.auto._
 import mx.cinvestav.commons.types.{Download, DownloadCompleted, Upload, UploadCompleted}
 import mx.cinvestav.operations.Operations
 import mx.cinvestav.commons.utils
+
 import scala.concurrent.duration._
 import language.postfixOps
 import retry._
 import retry.implicits._
+import fs2.Stream
+import fs2.concurrent.SignallingRef
+
+import scala.concurrent.duration._
+import language.postfixOps
 
 object DownloadV3 {
 
@@ -76,7 +82,8 @@ object DownloadV3 {
         case None => NotFound()
       }
     } yield response
-    case req@GET -> Root / "download" / objectId  => for {
+    case req@GET -> Root / "download" / objectId  =>
+      val app = for {
         arrivalTime <- IO.monotonic.map(_.toNanos)
         _ <- s.acquire
         currentState <- ctx.state.get
@@ -123,11 +130,28 @@ object DownloadV3 {
               )
             }
 
-//            _ <- IO.unit.retryingOnFailures{
-//
-//            }
+            signal <- SignallingRef[IO,Boolean](false)
+            maybeDownload              <- Stream.awakeEvery[IO](period = 1 second).evalMap{ _=>
+              for {
+                   currentState <- ctx.state.get
+                   readyToDownload = currentState.readyToDownload
+                   downloads = readyToDownload.getOrElse(selectedNodeId,Nil)
+                   x        <- if(downloads.contains(operationId)) {
+                     for {
+                        _        <- ctx.state.update{ s=> s.copy( readyToDownload =  s.readyToDownload.updated(selectedNodeId, downloads.filter(_ != operationId) ) ) }
+                        response = Operations.downloadv2(download).flatMap(_.body)
+                        _ <- signal.set(true)
+                     } yield response
+                   }
+                   else Stream.emits(Array.emptyByteArray).covary[IO].pure[IO]
+              } yield x
+            }.interruptWhen(signal).compile.last
 
-            response       <- Ok()
+
+            response       <- maybeDownload match {
+              case Some(value) => Ok(value)
+              case None => Forbidden()
+            }
           } yield response
           case None => NotFound()
         }
@@ -138,6 +162,10 @@ object DownloadV3 {
         //
         _ <- s.release
       } yield response
+
+      app.onError{ e=>
+        ctx.logger.error(e.getMessage)
+      }
   }
 
 
