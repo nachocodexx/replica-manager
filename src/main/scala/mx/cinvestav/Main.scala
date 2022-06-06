@@ -58,10 +58,10 @@ object Main extends IOApp {
   override def run(args: List[String]): IO[ExitCode] = {
     for {
       (client,finalizer)         <- BlazeClientBuilder[IO](global).withDefaultSocketReuseAddress.resource.allocated
-      sDownload                  <- Semaphore[IO](config.nSemaphore)
+      s                          <- Semaphore[IO](config.nSemaphore)
       implicit0(ctx:NodeContext) <- initContext(client)
-      _                          <- Daemon(period = ctx.config.daemonDelayMs milliseconds).compile.drain.start
-      _                          <- HttpServer(sDownload).run()
+      _                          <- Daemon(period = ctx.config.nextOperationDelayMs milliseconds).compile.drain.start
+      _                          <- HttpServer(s).run()
       _                          <- finalizer
     } yield (ExitCode.Success)
   }

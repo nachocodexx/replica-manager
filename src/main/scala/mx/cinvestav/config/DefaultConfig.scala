@@ -121,5 +121,9 @@ case class DefaultConfig(
                           replicationTransferType:String = "PUSH",
                           nSemaphore:Int = 1,
                           defaultImpactFactor:Double = 0.0,
-                          elasticityTime:String = "DEFERRED"
+                          elasticityTime:String = "DEFERRED",
+                          nextOperationDelayMs:Long=1000,
+                          maxRetries:Int = 10,
+                          extraServiceTimeMs:Long = 1000,
+                          exponentialBackoffMs:Long = 300
                         )

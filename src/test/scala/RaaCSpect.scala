@@ -15,6 +15,9 @@ import io.circe.syntax._
 import io.circe.generic.auto._
 import mx.cinvestav.Declarations.Implicits._
 //import mx.cinvestav.operations.Operations
+import scala.concurrent.duration._
+import language.postfixOps
+import fs2._
 class RaaCSpect extends munit .CatsEffectSuite {
 
   test("AA") {
@@ -56,64 +59,51 @@ class RaaCSpect extends munit .CatsEffectSuite {
         totalMemoryCapacity = 100,
         availableMemoryCapacity = 100,
         usedMemoryCapacity = 0),
-      "sn-2" -> NodeX(nodeId = "sn-2", ip = "", port = 0,
-        totalStorageCapacity = 100,
-        availableStorageCapacity = 100,
-        usedStorageCapacity = 0,
-        metadata = Map.empty[String, String],
-        ufs = NodeUFs.empty("sn-2"),
-        totalMemoryCapacity = 100,
-        availableMemoryCapacity = 100,
-        usedMemoryCapacity = 0),
-      "sn-3" -> NodeX(nodeId = "sn-3", ip = "", port = 0,
-        totalStorageCapacity = 100,
-        availableStorageCapacity = 100,
-        usedStorageCapacity = 0,
-        metadata = Map.empty[String, String],
-        ufs = NodeUFs.empty("sn-3"),
-        totalMemoryCapacity = 100,
-        availableMemoryCapacity = 100,
-        usedMemoryCapacity = 0),
-      "sn-4" -> NodeX(nodeId = "sn-4", ip = "", port = 0,
-        totalStorageCapacity = 100,
-        availableStorageCapacity = 100,
-        usedStorageCapacity = 0,
-        metadata = Map.empty[String, String],
-        ufs = NodeUFs.empty("sn-4"),
-        totalMemoryCapacity = 100,
-        availableMemoryCapacity = 100,
-        usedMemoryCapacity = 0)
+//      "sn-2" -> NodeX(nodeId = "sn-2", ip = "", port = 0,
+//        totalStorageCapacity = 100,
+//        availableStorageCapacity = 100,
+//        usedStorageCapacity = 0,
+//        metadata = Map.empty[String, String],
+//        ufs = NodeUFs.empty("sn-2"),
+//        totalMemoryCapacity = 100,
+//        availableMemoryCapacity = 100,
+//        usedMemoryCapacity = 0),
+//      "sn-3" -> NodeX(nodeId = "sn-3", ip = "", port = 0,
+//        totalStorageCapacity = 100,
+//        availableStorageCapacity = 100,
+//        usedStorageCapacity = 0,
+//        metadata = Map.empty[String, String],
+//        ufs = NodeUFs.empty("sn-3"),
+//        totalMemoryCapacity = 100,
+//        availableMemoryCapacity = 100,
+//        usedMemoryCapacity = 0),
+//      "sn-4" -> NodeX(nodeId = "sn-4", ip = "", port = 0,
+//        totalStorageCapacity = 100,
+//        availableStorageCapacity = 100,
+//        usedStorageCapacity = 0,
+//        metadata = Map.empty[String, String],
+//        ufs = NodeUFs.empty("sn-4"),
+//        totalMemoryCapacity = 100,
+//        availableMemoryCapacity = 100,
+//        usedMemoryCapacity = 0)
 
     )
 //  ________________________________________________________________
-    def fn(ur: UploadRequest,operations:List[Operation]) = {
-      val xx = ur.what.foldLeft((nodexs,List.empty[ReplicationSchema] )) {
-        case (x, w) =>
-          val ns = x._1
-          val rf = w.metadata.get("REPLICATION_FACTOR").flatMap(_.toIntOption).getOrElse(1)
-
-          val objectSize    = w.metadata.get("OBJECT_SIZE").flatMap(_.toLongOption).getOrElse(0L)
-          val selectedNodes = Operations.uploadBalance("SORTING_UF", ns)(operations = operations, objectSize = objectSize, rf = rf)
-          val xs = selectedNodes
-//          val xs            = selectedNodes.map(n => Operations.updateNodeX(n, objectSize))
-          val y             = xs.foldLeft(ns) { case (xx, n) => xx.updated(n.nodeId, n)}
-          val yy            = selectedNodes.map(_.nodeId).map(y)
-          val pivotNode     = yy.head
-          val where         = yy.tail.map(_.nodeId).toList
-          val rs = ReplicationSchema(
-            nodes = Nil,
-            data = Map(pivotNode.nodeId -> ReplicationProcess(what = w::Nil,where =where,how = How("ACTIVE","PUSH"),when = "REACTIVE" ))
-          )
-          ( y, x._2 :+ rs )
-      }
-      xx
-    }
-
     for {
       _                           <- IO.unit
       defaultState                = NodeState(
           nodes =nodexs,
-          operations = List(),
+          operations = List(
+            Upload.empty.copy(nodeId = "sn-0",objectSize = 10),
+            Upload.empty.copy(nodeId = "sn-0",objectSize = 10),
+            Upload.empty.copy(nodeId = "sn-0",objectSize = 10),
+            Upload.empty.copy(nodeId = "sn-0",objectSize = 10),
+            Upload.empty.copy(nodeId = "sn-0",objectSize = 10),
+            Upload.empty.copy(nodeId = "sn-0",objectSize = 10),
+            Upload.empty.copy(nodeId = "sn-1",objectSize=10),
+            Upload.empty.copy(nodeId = "sn-1",objectSize=10),
+            Upload.empty.copy(nodeId = "sn-1",objectSize=10),
+          ),
           completedQueue = Map(
             "sn-0"-> List(
               UploadCompleted.empty.copy(serviceTime = 100,waitingTime = 1000,nodeId = "sn-0"),
@@ -144,34 +134,74 @@ class RaaCSpect extends munit .CatsEffectSuite {
         client                  = client,
         systemReplicationSignal = signal
       )
-      ur                          = UploadRequest(
-        what = List(
-          What(id = "f1", url = "", metadata = Map("OBJECT_SIZE"->"10", "REPLICATION_FACTOR"-> "3")  ),
-        ),
-        elastic = true
+      what                        = List(
+          What(id = "f1", url = "", metadata = Map("OBJECT_SIZE"->"10", "REPLICATION_FACTOR"-> "2")  ),
+          What(id = "f2", url = "", metadata = Map("OBJECT_SIZE"->"10", "REPLICATION_FACTOR"-> "1")  ),
       )
-
-
-      (newNodexs,rss)             =  Operations.processUploadRequest(
+      ur                          = UploadRequest(
+        what                 = what,
+        elastic              = true,
+        replicationTechnique = "PASSIVE",
+        metadata             = Map.empty[String,String]
+      )
+//      (newNodexs,rss)             =  Operations.processUploadRequest(
+      pur             =  Operations.processUploadRequest(
         lbToken= "MIN_WAITING_TIME",
         operations =defaultState.operations,
         queue = defaultState.nodeQueue,
         completedQueue = defaultState.completedQueue,
       )(ur = ur,nodexs = defaultState.nodes)
-      _                           <- ctx.state.update(s=>s.copy(nodes = newNodexs))
+      _                           <- ctx.state.update(s=>s.copy(nodes = pur.nodexs ))
       clientId                    = "client-0"
 //    ____________________________________
       processRS       = (sr:ReplicationSchema) => Operations.processRSAndUpdateQueue(clientId = clientId)(rs = sr )
-      xs              <- rss.traverse(processRS).map(_.flatten)
+      xs              <- pur.rss.traverse(processRS).map(_.flatten)
       xsGrouped       = xs.groupBy(_.nodeId).map{
         case (nId,ops)=> nId -> ops.sortBy(_.serialNumber)
       }
       x               <- Operations.generateUploadBalance(xs = xsGrouped)
-//      _               <- IO.println(newNodexs.asJson.toString)
-      _ <- IO.println(rss.asJson.toString)
+//      _ <- IO.println(pur.asJson.toString)
 //    ____________________________________
       currentState <- ctx.state.get
-      _ <- fx
+      _ <- IO.println(currentState.nodes.toString)
+//      _ <- fx
+      newN = Operations.processNodes(
+        nodexs = currentState.nodes,
+        completedOperations = currentState.completedOperations,
+        operations= currentState.operations,
+        queue = currentState.nodeQueue
+      )
+      _ <- IO.println(newN.toMap.asJson.toString)
+    } yield ()
+  }
+  test("A"){
+    val baseUpCompletedSn0 = UploadCompleted.empty.copy(serviceTime = 1000,nodeId ="sn-0")
+    val baseUpCompletedSn1 = UploadCompleted.empty.copy(serviceTime = 1000,nodeId ="sn-1")
+    val queue = Map("sn-0" -> List(
+      Upload.empty.copy(arrivalTime = 0),
+      Upload.empty.copy(arrivalTime = 100)
+    ),
+      "sn-1"->List.fill(10)(Upload.empty.copy(arrivalTime=0))
+    )
+    val completedOps = Map("sn-0"->List.fill(100)(baseUpCompletedSn0), "sn-1"-> List.fill(10)(baseUpCompletedSn1))
+    val wts = Operations.getAVGWaitingTimeByNode(completedOperations = completedOps,queue = queue)
+    println(wts)
+  }
+
+  test("R") {
+    for {
+      ref <- IO.ref(true)
+      _ <- Stream.awakeEvery[IO](1 second)
+        .evalMap{ x =>
+          for{
+            _ <- IO.println(s"ATTEMP $x")
+            x = scala.util.Random.nextInt(1000)
+            _ <- IO.println(s"NUMBER $x")
+            _ <- if(x % 5 ) IO.println("END") *> ref.update(x=>true)
+            else IO.unit
+          } yield ()
+        }
+        .compile.start
     } yield ()
   }
 

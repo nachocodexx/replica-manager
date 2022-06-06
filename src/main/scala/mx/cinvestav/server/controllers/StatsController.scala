@@ -51,15 +51,17 @@ object StatsController {
         nodeIds            = Events.getNodeIds(events = events)
 
         avgServiceTime = Operations.getAVGServiceTime(operations = currentState.completedOperations)
-        _ <- IO.unit
+        processedN = Operations.processNodes(
+          nodexs = currentState.nodes,
+          completedOperations = currentState.completedOperations,
+          queue = nodesQueue,
+          operations = currentState.operations
+        ).toMap
+
         stats              = Map(
           "nodeId" -> ctx.config.nodeId.asJson,
           "port"  -> ctx.config.port.asJson,
-          "nodes" -> Operations.processNodes(
-            nodexs = currentState.nodes,
-            completedOperations = currentState.completedOperations,
-            queue = nodesQueue
-          ).toMap.asJson,
+          "nodes" -> processedN.asJson,
           "nodeIds" -> nodeIds.asJson,
           "loadBalancing" -> Json.obj(
             "download" -> currentState.downloadBalancerToken.asJson,
@@ -70,9 +72,11 @@ object StatsController {
           "completedQueues" -> completedQueues.asJson,
           "avgServiceTime" -> avgServiceTime.asJson,
           "distributionSchema" -> ds.asJson,
-          "avgWaitingTimesByNode"  -> Operations.getAVGWaitingTimeNodeIdXCOps(currentState.completedQueue).asJson,
-          "avgServiceTimesByNode"  -> Operations.getAVGServiceTimeNodeIdXCOps(currentState.completedQueue).asJson
-
+          "totalAvgWaitingTimesByNode"  -> Operations.getAVGWaitingTimeNodeIdXCOps(currentState.completedQueue).asJson,
+          "avgServiceTimesByNode"  -> Operations.getAVGServiceTimeNodeIdXCOps(currentState.completedQueue).asJson,
+          "avgWaitingTimesByNode"  -> Operations.getAVGWaitingTimeByNode(completedOperations = currentState.completedQueue,queue = currentState.nodeQueue).asJson,
+          "accessByBall" -> Operations.ballAccess(completedOperations = currentState.completedOperations).asJson,
+          "operationsByNode" -> currentState.operations.groupBy(_.nodeId).asJson
         )
         response <- Ok(stats)
       } yield response

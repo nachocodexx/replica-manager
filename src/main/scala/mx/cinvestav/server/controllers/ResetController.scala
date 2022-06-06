@@ -6,7 +6,7 @@ import mx.cinvestav.Declarations.NodeContext
 import mx.cinvestav.Helpers
 import mx.cinvestav.commons.events
 import mx.cinvestav.commons.events.EventX
-import mx.cinvestav.commons.types.PendingReplication
+import mx.cinvestav.commons.types.{CompletedOperation, Operation, PendingReplication}
 import mx.cinvestav.events.Events
 import org.http4s.{HttpRoutes, Method, Request, Uri}
 import org.http4s.implicits._
@@ -29,7 +29,12 @@ object ResetController {
               case _:Events.UpdatedNetworkCfg => true
               case _=>false
             },
-            pendingReplicas = Map.empty[String,PendingReplication]
+            pendingReplicas   = Map.empty[String,PendingReplication],
+            pendingQueue      = Map.empty[String,Option[Operation]],
+            nodeQueue           = Map.empty[String,List[Operation]],
+            completedQueue      = Map.empty[String,List[CompletedOperation]],
+            operations          = Nil,
+            completedOperations = Nil,
           )
 
         }

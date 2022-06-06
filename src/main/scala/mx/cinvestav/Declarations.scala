@@ -139,13 +139,14 @@ object Declarations {
                         replicationFactor:Int = 0,
                         availableResources:Int = 5,
                         replicationTechnique:String = "ACTIVE",
+
                         pendingQueue:Map[String,Option[Operation]] = Map.empty[String,Option[Operation]],
                         nodeQueue:Map[String,List[Operation] ] = Map.empty[String,List[Operation]],
                         completedQueue:Map[String,List[CompletedOperation]] = Map.empty[String,List[CompletedOperation]],
                         operations:List[Operation] = Nil,
                         completedOperations:List[CompletedOperation] = Nil,
                         lastSerialNumber:Int =0,
-                        nodes:Map[String,NodeX] = Map.empty[String,NodeX]
+                        nodes:Map[String,NodeX] = Map.empty[String,NodeX],
 
                         )
   case class NodeContext(

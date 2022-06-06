@@ -13,6 +13,10 @@ import org.typelevel.ci.CIString
 import io.circe.syntax._
 import io.circe.generic.auto._
 import mx.cinvestav.commons.types.NodeWhat
+import mx.cinvestav.operations.Operations.{ProcessedUploadRequest, nextOperation}
+//
+import scala.concurrent.duration._
+import language.postfixOps
 
 //
 import mx.cinvestav.Declarations.NodeContext
@@ -26,81 +30,78 @@ import mx.cinvestav.operations.Operations
 
 object UploadV3 {
 
-  def elasticity(payload:UploadRequest)(implicit ctx:NodeContext) = {
-    if(payload.elastic){
-      val leftNodes = payload.what.map(_.metadata.getOrElse("REPLICATION_FACTOR","1").toInt).max
-      val xs = (0 until leftNodes).toList.traverse{ index=>
-        val x =  if(ctx.config.elasticityTime == "REACTIVE")  {
-          val nrs = NodeReplicationSchema.empty(id = "")
-          val app = ctx.config.systemReplication.createNode(nrs = nrs)
-          app.map(_.nodeId)
-        } else   {
-          val id = utils.generateStorageNodeId(autoId = true)
-          val nrs = NodeReplicationSchema.empty(id =  id)
-          val app = ctx.config.systemReplication.createNode(nrs = nrs)
-          app.start.map(_=> id)
+
+  def elasticity(payload:UploadRequest,nodes:Map[String,NodeX])(implicit ctx:NodeContext) = {
+    val nodeIdIO = if(payload.elastic){
+      val maxRF = payload.what.map(_.metadata.getOrElse("REPLICATION_FACTOR","1").toInt).max
+      if(maxRF > nodes.size) {
+        val xs = (0 until  (maxRF-nodes.size) ).toList.traverse{ index=>
+          val x =  if(ctx.config.elasticityTime == "REACTIVE")  {
+            val nrs = NodeReplicationSchema.empty(id = "")
+            val app = ctx.config.systemReplication.createNode(nrs = nrs)
+            app.map(_.nodeId)
+          } else   {
+            val id = utils.generateStorageNodeId(autoId = true)
+            val nrs = NodeReplicationSchema.empty(id =  id)
+            val app = ctx.config.systemReplication.createNode(nrs = nrs)
+            app.start.map(_=> id)
+          }
+          x
         }
-        x
-      }
-      xs
+        xs
+      } else IO.pure(Nil)
     }
     else IO.pure(List.empty[String])
+
+
+    nodeIdIO.map(nodeIds =>  nodeIds.map(nodeId => NodeX.empty(nodeId = nodeId) ))
   }
 
-  def sendRP(rp:Map[String,ReplicationProcess])(implicit ctx:NodeContext) = {
-    for{
-      _ <- IO.unit
-    } yield ()
-  }
 
 
   def apply(s:Semaphore[IO])(implicit ctx:NodeContext) = HttpRoutes.of[IO]{
 
-    case req@GET -> Root / "upload" =>
+    case req@POST -> Root / "upload" =>
       val app = for {
 //    _____________________________________________________________________
       _                  <- s.acquire
+      currentState       <- ctx.state.get
       headers            = req.headers
       clientId           = headers.get(CIString("Client-Id")).map(_.head.value).getOrElse("CLIENT_ID")
-      technique          = headers.get(CIString("Replication-Technique")).map(_.head.value).getOrElse(ctx.config.replicationTechnique)
       arrivalTime        <- IO.monotonic.map(_.toNanos)
       payload            <- req.as[UploadRequest]
-
-      newNodes           <- elasticity(payload)
+      newNodes           <- elasticity(payload,nodes= currentState.nodes).map(ns=> ns.map(n=>n.nodeId -> n).toMap )
 //    __________________________________________________________________________________________________________________
+      _                  <- ctx.state.update{s=> s.copy(nodes = s.nodes ++ newNodes)}
       currentState       <- ctx.state.get
-      nodesQueue         = currentState.nodeQueue
+//    __________________________________________________________________________________________________________________
       avgServiceTimes    = Operations.getAVGServiceTime(operations= currentState.completedOperations)
       nodexs             = currentState.nodes
-      ar                 = nodexs.size
-//      ds                 = Operations.distributionSchema(operations = Nil,completedOperations = currentState.completedOperations,queue = nodesQueue,technique =technique)
-
+      _ <-ctx.logger.debug(s"NODEXS ${nodexs.keys}")
+//      ar                 = nodexs.size
 //    __________________________________________________________________________________________________________________
-      _                  <- ctx.logger.debug(avgServiceTimes.asJson.toString)
-      (nodes,rss)        = Operations.processUploadRequest(operations = currentState.operations)(ur = payload,nodexs = nodexs)
-//
+      _                  <- ctx.logger.debug("AVG_ST "+avgServiceTimes.asJson.toString)
+      pur                = Operations.processUploadRequest(operations = currentState.operations)(ur = payload,nodexs = nodexs)
       _                  <- ctx.state.update{ s=>
         s.copy(
-          nodes = nodes
+          nodes = pur.nodexs
         )
       }
-
-      newOps                <- rss.traverse(rs=>Operations.processRSAndUpdateQueue(clientId = clientId)( rs = rs)).map(_.flatten)
-      xsGrouped    = newOps.groupBy(_.nodeId).map{
+      newOps             <- pur.rss.traverse(rs=>Operations.processRSAndUpdateQueue(clientId = clientId)( rs = rs)).map(_.flatten)
+      _ <- ctx.state.update{s=>s.copy(operations = s.operations ++ newOps)}
+      xsGrouped          = newOps.groupBy(_.nodeId).map{
         case (nId,ops)=> nId -> ops.sortBy(_.serialNumber)
       }
-
+//      EXTRA SERVICE TIME
+      extra = scala.util.Random.nextLong(ctx.config.extraServiceTimeMs) + scala.util.Random.nextLong(1000L)+100
+      _                 <- IO.sleep(extra milliseconds)
+//
       serviceTime        <- IO.monotonic.map(_.toNanos - arrivalTime)
       id                 = utils.generateNodeId(prefix = "op",autoId=true)
       uploadRes          <- Operations.generateUploadBalance(xs = xsGrouped).map(_.copy(serviceTime = serviceTime,id=id))
       response           <- Ok(uploadRes.asJson)
       _                  <- s.release
-      _ <- rss.traverse{ rs =>
-        rs.data.headOption match {
-          case Some(value) => ???
-          case None => IO.unit
-        }
-      }
+//        _ <- next.start
     } yield response
       app.onError{ e=>
         ctx.logger.error(e.getMessage)
@@ -112,10 +113,18 @@ object UploadV3 {
       nodeId           = headers.get(CIString("Node-Id")).map(_.head.value).getOrElse("NODE_ID")
       objectId         = headers.get(CIString("Object-Id")).map(_.head.value).getOrElse("")
       operationId      = headers.get(CIString("Operation-Id")).map(_.head.value).getOrElse("")
+//      objectSize       = headers.get(CIString("Object-Size")).map(_.head.value).getOrElse("")
       queue            = currentState.nodeQueue
-      nodeQueue        = queue.getOrElse(nodeId,Nil)
+      nodeQueue        = queue.getOrElse(nodeId,Nil).sortBy(_.serialNumber)
       completeQueue    = currentState.completedQueue.getOrElse(nodeId,Nil)
-      maybeUp          = nodeQueue.find(_.operationId == operationId)
+//      maybeUp          = nodeQueue.find(_.operationId == operationId)
+      maybeUp          = currentState.operations.find(_.operationId == operationId)
+
+      _ <- ctx.logger.debug(s"OBJECT_ID $objectId")
+      _ <- ctx.logger.debug(s"OPERATION_ID $operationId")
+      _ <- ctx.logger.debug(maybeUp.toString)
+      _ <- ctx.logger.debug("________________________________")
+
       lastCompleted    = completeQueue.maxByOption(_.arrivalTime)
 
       response         <- maybeUp match {
@@ -132,22 +141,23 @@ object UploadV3 {
                 idleTime     = if(wt < 0L) wt*(-1) else 0L,
                 objectId     = objectId,
                 nodeId       = nodeId,
-                metadata      = Map.empty[String,String],
+                metadata     = Map.empty[String,String] ++ up.metadata,
+                objectSize   = up.objectSize
               )
-              val nextOp    = nodeQueue.headOption
+              val nextOp    = nodeQueue.filter(_.operationId != operationId).minByOption(_.serialNumber)
                val saveOp = ctx.state.update{ s=>
                  s.copy(
-                   completedQueue      =  s.completedQueue.updatedWith(nodeId){
-                     op=>
-                       op match {
-                         case Some(value) =>
-                           op.map( x => x :+ completed )
-                         case None => (completed::Nil).some
-                       }
+                   completedQueue      =  s.completedQueue.updatedWith(nodeId) {
+                     case op@Some(value) =>
+                       op.map(x => x :+ completed)
+                     case None => (completed :: Nil).some
                    },
                    completedOperations =  s.completedOperations :+completed,
                    pendingQueue        =  s.pendingQueue.updated(nodeId,nextOp),
-                   nodeQueue           =  s.nodeQueue.updated(nodeId,s.nodeQueue.getOrElse(nodeId,Nil).filterNot(_.operationId == operationId ))
+                   nodeQueue           =  s.nodeQueue.updated(
+                     nodeId,
+                     s.nodeQueue.getOrElse(nodeId,Nil).filterNot(_.operationId == operationId )
+                   )
                  )
                }
               for {
@@ -159,8 +169,8 @@ object UploadV3 {
         case None => NotFound()
       }
     } yield response
-    case req@POST -> Root / "upload" =>
-//      val
+
+    case req@POST -> Root /"foo"/ "upload" =>
       for {
         currentState <- ctx.state.get
         rawEvents    = currentState.events
