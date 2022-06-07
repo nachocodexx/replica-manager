@@ -64,8 +64,25 @@ object Operations {
   def launchOperation(op:Operation)(implicit ctx:NodeContext) = {
     val x = op match {
       case d: Download =>
-        ctx.state.update{s=>s.copy(readyToDownload = s.readyToDownload |+| Map(d.nodeId -> List(d.operationId) )    )}
-        NoContent()
+        val storageNodeURL = s"http://${d.nodeId}:6666/api/v3/download/${d.objectId}"
+        val req = Request[IO](
+          method = Method.POST,
+          uri = Uri.unsafeFromString(s"http://${d.clientId}:9000/api/v2/pull"),
+          headers = Headers(
+            Header.Raw(CIString("Object-Id"), d.objectId),
+            Header.Raw(CIString("Object-Size"), d.objectSize.toString),
+            Header.Raw(CIString("Operation-Id"), d.operationId),
+            Header.Raw(CIString("Serial-Number"), d.serialNumber.toString),
+            Header.Raw(CIString("Object-Uri"), storageNodeURL),
+          )
+        )
+        for {
+          response <- ctx.client.stream(req = req).compile.lastOrError.handleErrorWith{ e=>
+            val x = ctx.logger.error(e.getMessage)  *> InternalServerError()
+            x
+          }
+          _        <- ctx.logger.debug("NODE_UPLOAD_STATUS "+response.toString)
+        } yield response
 
       case u: Upload =>
         val req = Request[IO](
@@ -153,14 +170,14 @@ object Operations {
     val sts = getAVGServiceTime(operations = completedOperations.values.flatten.toList)
     queue.map{
       case (nodeId, ops) =>
-        val lastDt = completedOperations.getOrElse(nodeId,Nil).maxByOption(_.serialNumber).map(_.departureTime).getOrElse(0L)
+//        val lastDt = completedOperations.getOrElse(nodeId,Nil).maxByOption(_.serialNumber).map(_.departureTime).getOrElse(0L)
         val avgST  = sts.getOrElse(nodeId,0.0)
         val (_,cOps) =  ops.foldLeft( (Option.empty[CompletedOperation],List.empty[CompletedOperation]) ){
           case ((lastOp,cOps),currentOp) =>
             lastOp match {
-              case Some(value) =>
-                val wt          = value.departureTime - currentOp.arrivalTime
-                val completedOp = value.asInstanceOf[UploadCompleted].copy(
+              case Some(last) =>
+                val wt          = last.departureTime - currentOp.arrivalTime
+                val completedOp = last.asInstanceOf[UploadCompleted].copy(
                   serviceTime = avgST.toLong,
                   arrivalTime = currentOp.arrivalTime,
                   waitingTime = if(wt < 0 ) 0L else wt,
@@ -180,6 +197,7 @@ object Operations {
         (nodeId -> (if(cOps.isEmpty) 0.0 else cOps.map(_.waitingTime).sum.toDouble/cOps.length.toDouble) )
     }
   }
+
 
   def getAVGServiceTimeNodeIdXCOps(xs:Map[String,List[CompletedOperation]]) = {
     xs.map{
@@ -547,7 +565,7 @@ object Operations {
         case _ => ""
       }
       avgServiceTimeByNode = Operations.getAVGServiceTime(operations = operations)
-      avgWaitingTimeByNode = Operations.getAVGWaitingTime(operations = operations)
+      avgWaitingTimeByNode = Operations.getAVGWaitingTimeByNode(completedOperations = currentState.completedQueue,queue = currentState.nodeQueue)
       id                   = utils.generateNodeId(prefix = "ub",len = 10,autoId = true)
       xxs = groupedByOId.map{
         case (objectId, value) =>
@@ -556,8 +574,8 @@ object Operations {
             NodeQueueStats(
               operationId =x.operationId ,
               nodeId = x.nodeId,
-              avgServiceTime = avgServiceTimeByNode.getOrElse(x.nodeId,Double.MaxValue),
-              avgWaitingTime = avgWaitingTimeByNode.getOrElse(x.nodeId,Double.MaxValue),
+              avgServiceTime = avgServiceTimeByNode.getOrElse(x.nodeId,0.0),
+              avgWaitingTime = avgWaitingTimeByNode.getOrElse(x.nodeId,0.0),
               queuePosition = x.serialNumber
             )
           }.toList

@@ -76,11 +76,12 @@ object UploadV3 {
       currentState       <- ctx.state.get
 //    __________________________________________________________________________________________________________________
       avgServiceTimes    = Operations.getAVGServiceTime(operations= currentState.completedOperations)
+//      avgWaitingTimes    = Operations.getAVGWaitingTimeByNode(completedOperations= currentState.completedQueue,queue = currentState.nodeQueue)
       nodexs             = currentState.nodes
       _ <-ctx.logger.debug(s"NODEXS ${nodexs.keys}")
 //      ar                 = nodexs.size
 //    __________________________________________________________________________________________________________________
-      _                  <- ctx.logger.debug("AVG_ST "+avgServiceTimes.asJson.toString)
+//      _                  <- ctx.logger.debug("AVG_ST "+avgServiceTimes.asJson.toString)
       pur                = Operations.processUploadRequest(operations = currentState.operations)(ur = payload,nodexs = nodexs)
       _                  <- ctx.state.update{ s=>
         s.copy(
@@ -98,10 +99,10 @@ object UploadV3 {
 //
       serviceTime        <- IO.monotonic.map(_.toNanos - arrivalTime)
       id                 = utils.generateNodeId(prefix = "op",autoId=true)
-      uploadRes          <- Operations.generateUploadBalance(xs = xsGrouped).map(_.copy(serviceTime = serviceTime,id=id))
+      uploadRes          <- Operations.generateUploadBalance(xs = xsGrouped)
+        .map{_.copy(serviceTime = serviceTime,id=id)}
       response           <- Ok(uploadRes.asJson)
       _                  <- s.release
-//        _ <- next.start
     } yield response
       app.onError{ e=>
         ctx.logger.error(e.getMessage)

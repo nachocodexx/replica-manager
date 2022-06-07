@@ -13,7 +13,7 @@ import org.http4s.circe.CirceEntityEncoder._
 import org.typelevel.ci.CIString
 import io.circe.syntax._
 import io.circe.generic.auto._
-import mx.cinvestav.commons.types.{Download, DownloadCompleted, Upload, UploadCompleted}
+import mx.cinvestav.commons.types.{Download, DownloadCompleted, DownloadResult, NodeQueueStats, Upload, UploadCompleted}
 import mx.cinvestav.operations.Operations
 import mx.cinvestav.commons.utils
 
@@ -98,6 +98,8 @@ object DownloadV3 {
         )
         maybeObject  = ds.get(objectId).flatMap(xs=>Option.when(xs.nonEmpty)(xs))
         queue        = currentState.nodeQueue
+        avgSTS       = Operations.getAVGServiceTime(operations= currentState.completedOperations)
+        avgWTS       = Operations.getAVGWaitingTimeByNode(completedOperations = currentState.completedQueue,queue = queue )
         response     <- maybeObject match {
           case Some(replicaNodes) => for {
             _            <- ctx.logger.debug(s"REPLICA_NODES $replicaNodes")
@@ -134,32 +136,18 @@ object DownloadV3 {
               )
             }
 
-            response <- Ok()
-//            signal <- SignallingRef[IO,Boolean](false)
+            result = DownloadResult(
+              id = utils.generateNodeId(prefix = "download",autoId = true),
+              result = NodeQueueStats(
+                operationId = operationId, nodeId = selectedNodeId,
+                avgServiceTime = avgSTS.getOrElse(selectedNodeId,0.0),
+                avgWaitingTime = avgSTS.getOrElse(selectedNodeId,0.0),
+                queuePosition = q.length
+              )
+            )
 
+            response <- Ok(result.asJson)
 
-//            maybeDownload              <- Stream.awakeEvery[IO](period = 1 second).evalMap{ _=>
-//              for {
-//                   currentState <- ctx.state.get
-//                   readyToDownload = currentState.readyToDownload
-//                   downloads = readyToDownload.getOrElse(selectedNodeId,Nil)
-//                   _ <- ctx.logger.debug(readyToDownload.toString)
-//                   x        <- if(downloads.contains(operationId)) {
-//                     for {
-//                        _        <- ctx.state.update{ s=> s.copy( readyToDownload =  s.readyToDownload.updated(selectedNodeId, downloads.filter(_ != operationId) ) ) }
-//                        response = Operations.downloadv2(download).flatMap(_.body)
-//                        _ <- signal.set(true)
-//                     } yield response
-//                   }
-//                   else Stream.emits(Array.emptyByteArray).covary[IO].pure[IO]
-//              } yield x
-//            }.interruptWhen(signal).compile.last
-
-
-//            response       <- maybeDownload match {
-//              case Some(value) => Ok(value)
-//              case None => Forbidden()
-//            }
           } yield response
           case None => NotFound()
         }
