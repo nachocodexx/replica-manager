@@ -101,9 +101,12 @@ object DownloadV3 {
         response     <- maybeObject match {
           case Some(replicaNodes) => for {
             _            <- ctx.logger.debug(s"REPLICA_NODES $replicaNodes")
+            replicaNodeX = replicaNodes.map(currentState.nodes).map(n=>n.nodeId -> n).toMap
             operationId  = utils.generateNodeId(prefix = "op-",len = 10,autoId=true)
             selectedNode = if(replicaNodes.length == 1 ) currentState.nodes(replicaNodes.head)
-            else Operations.downloadBalance(x = ctx.config.downloadLoadBalancer,nodexs = currentState.nodes)(
+
+            else Operations.downloadBalance(x = ctx.config.downloadLoadBalancer,nodexs = replicaNodeX )(
+              objectId  = objectId,
               operations = currentState.operations,
               queue=currentState.nodeQueue,
               completedQueue = currentState.completedQueue,
@@ -112,6 +115,7 @@ object DownloadV3 {
             selectedNodeId = selectedNode.nodeId
             _              <- ctx.logger.debug(s"SELECTED_NODE $selectedNodeId")
             q              = queue.getOrElse(selectedNodeId,Nil)
+
             download       = Download(
               operationId   = operationId,
               serialNumber  = q.length,
@@ -130,28 +134,32 @@ object DownloadV3 {
               )
             }
 
-            signal <- SignallingRef[IO,Boolean](false)
-            maybeDownload              <- Stream.awakeEvery[IO](period = 1 second).evalMap{ _=>
-              for {
-                   currentState <- ctx.state.get
-                   readyToDownload = currentState.readyToDownload
-                   downloads = readyToDownload.getOrElse(selectedNodeId,Nil)
-                   x        <- if(downloads.contains(operationId)) {
-                     for {
-                        _        <- ctx.state.update{ s=> s.copy( readyToDownload =  s.readyToDownload.updated(selectedNodeId, downloads.filter(_ != operationId) ) ) }
-                        response = Operations.downloadv2(download).flatMap(_.body)
-                        _ <- signal.set(true)
-                     } yield response
-                   }
-                   else Stream.emits(Array.emptyByteArray).covary[IO].pure[IO]
-              } yield x
-            }.interruptWhen(signal).compile.last
+            response <- Ok()
+//            signal <- SignallingRef[IO,Boolean](false)
 
 
-            response       <- maybeDownload match {
-              case Some(value) => Ok(value)
-              case None => Forbidden()
-            }
+//            maybeDownload              <- Stream.awakeEvery[IO](period = 1 second).evalMap{ _=>
+//              for {
+//                   currentState <- ctx.state.get
+//                   readyToDownload = currentState.readyToDownload
+//                   downloads = readyToDownload.getOrElse(selectedNodeId,Nil)
+//                   _ <- ctx.logger.debug(readyToDownload.toString)
+//                   x        <- if(downloads.contains(operationId)) {
+//                     for {
+//                        _        <- ctx.state.update{ s=> s.copy( readyToDownload =  s.readyToDownload.updated(selectedNodeId, downloads.filter(_ != operationId) ) ) }
+//                        response = Operations.downloadv2(download).flatMap(_.body)
+//                        _ <- signal.set(true)
+//                     } yield response
+//                   }
+//                   else Stream.emits(Array.emptyByteArray).covary[IO].pure[IO]
+//              } yield x
+//            }.interruptWhen(signal).compile.last
+
+
+//            response       <- maybeDownload match {
+//              case Some(value) => Ok(value)
+//              case None => Forbidden()
+//            }
           } yield response
           case None => NotFound()
         }

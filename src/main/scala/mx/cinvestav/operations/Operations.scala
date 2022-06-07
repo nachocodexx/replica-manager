@@ -296,9 +296,29 @@ object Operations {
     }
   }
 
-//  def
+  def ballAccessByNodes(completedOperations:Map[String,List[CompletedOperation]]): Map[String, Map[String, Int]] = {
+    val COPS       = completedOperations.values.toList.flatten
+    val cDownloads = onlyDownloadCompleted(COPS).asInstanceOf[List[DownloadCompleted]]
+    val nodesByUps = onlyUploadCompleted(COPS).asInstanceOf[List[UploadCompleted]].groupBy(_.objectId)
+      .map{
+        case (objectId, ops) => objectId -> ops.map(_.nodeId).distinct
+      }
+    cDownloads.groupBy(_.objectId).map{
+      case (objectId,cops) =>
+        objectId -> cops.groupBy(_.nodeId)
+    }.map{
+      case (objectId,mcops) =>
+        val replicaNodes = nodesByUps.getOrElse(objectId,Nil).map(n=>n->0).toMap
+        val y = mcops.map{
+          case (nodeId,ops) => nodeId-> ops.length
+        } |+| replicaNodes
+//        val default =
+        objectId -> y
+    }
+  }
 
   def downloadBalance(x:String,nodexs:Map[String,NodeX])(
+                     objectId:String,
     operations:List[Operation] = Nil,
     queue:Map[String,List[Operation]] = Map.empty[String,List[Operation]],
     completedQueue:Map[String,List[CompletedOperation]] = Map.empty[String,List[CompletedOperation]],
@@ -306,7 +326,13 @@ object Operations {
   ) = {
     x match {
       case "LEAST_HITS"=>
-        NodeX.empty(nodeId = "")
+        val access          = Operations.ballAccessByNodes(completedOperations = completedQueue)
+        val accessByReplica = access.get(objectId)
+        accessByReplica match {
+          case Some(value) => nodexs(value.minBy(_._2)._1)
+          case None => nodexs.toList(Random.nextInt(nodexs.size))._2
+        }
+//        nodexs(accessByReplica.minBy(_._2))
       case "MIN_WAITING_TIME"  =>
         val defaultWtXNode   = nodexs.keys.toList.map(_ -> 0.0).toMap
         val waitingTimeXNode =  (defaultWtXNode ++ Operations.getAVGWaitingTimeByNode(

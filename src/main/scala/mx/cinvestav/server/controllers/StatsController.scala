@@ -76,6 +76,7 @@ object StatsController {
           "avgServiceTimesByNode"  -> Operations.getAVGServiceTimeNodeIdXCOps(currentState.completedQueue).asJson,
           "avgWaitingTimesByNode"  -> Operations.getAVGWaitingTimeByNode(completedOperations = currentState.completedQueue,queue = currentState.nodeQueue).asJson,
           "accessByBall" -> Operations.ballAccess(completedOperations = currentState.completedOperations).asJson,
+          "acessByNode" -> Operations.ballAccessByNodes(completedOperations = currentState.completedQueue).asJson,
           "operationsByNode" -> currentState.operations.groupBy(_.nodeId).asJson
         )
         response <- Ok(stats)
