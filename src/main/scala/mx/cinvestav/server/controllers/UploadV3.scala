@@ -103,7 +103,8 @@ object UploadV3 {
         .map{_.copy(serviceTime = serviceTime,id=id)}
       response           <- Ok(uploadRes.asJson)
       _                  <- s.release
-    } yield response
+      _                  <- ctx.logger.debug("_____________________________________________")
+      } yield response
       app.onError{ e=>
         ctx.logger.error(e.getMessage)
       }
@@ -145,7 +146,10 @@ object UploadV3 {
                 metadata     = Map.empty[String,String] ++ up.metadata,
                 objectSize   = up.objectSize
               )
+
               val nextOp    = nodeQueue.filter(_.operationId != operationId).minByOption(_.serialNumber)
+
+
                val saveOp = ctx.state.update{ s=>
                  s.copy(
                    completedQueue      =  s.completedQueue.updatedWith(nodeId) {
@@ -154,7 +158,13 @@ object UploadV3 {
                      case None => (completed :: Nil).some
                    },
                    completedOperations =  s.completedOperations :+completed,
-                   pendingQueue        =  s.pendingQueue.updated(nodeId,nextOp),
+                   pendingQueue        =  s.pendingQueue.updatedWith(nodeId){op=>
+                     op match {
+                       case Some(value) => None
+                       case None => nextOp.some
+                     }
+                   },
+//                     s.pendingQueue.updated(nodeId,nextOp),
                    nodeQueue           =  s.nodeQueue.updated(
                      nodeId,
                      s.nodeQueue.getOrElse(nodeId,Nil).filterNot(_.operationId == operationId )

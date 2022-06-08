@@ -22,6 +22,7 @@ import retry._
 import retry.implicits._
 
 object Operations {
+
   def ballAccess(completedOperations:List[CompletedOperation]): Map[String, Int] = {
     onlyDownloadCompleted(completedOperations).asInstanceOf[List[DownloadCompleted]]
       .groupBy(_.objectId)
@@ -67,7 +68,7 @@ object Operations {
         val storageNodeURL = s"http://${d.nodeId}:6666/api/v3/download/${d.objectId}"
         val req = Request[IO](
           method = Method.POST,
-          uri = Uri.unsafeFromString(s"http://${d.clientId}:9000/api/v2/pull"),
+          uri = Uri.unsafeFromString(s"http://${d.clientId}:9001/api/v2/pull"),
           headers = Headers(
             Header.Raw(CIString("Object-Id"), d.objectId),
             Header.Raw(CIString("Object-Size"), d.objectSize.toString),
@@ -113,10 +114,11 @@ object Operations {
     val (newPending, nextOps)  = nodexs.foldLeft( (pending,List.empty[ Operation ]) ){
       case ( p,node ) =>
         val  nodeId = node.nodeId
-        val op      = pending.getOrElse(nodeId,None)
+        val pendingOp      = pending.getOrElse(nodeId,None)
         val q       = queue.getOrElse(nodeId,Nil).sortBy(_.serialNumber)
-
-        op match {
+        println(s"QUEUE $q")
+        println(s"PENDING_OP $pendingOp")
+        pendingOp match {
         case Some(_) => p
         case None =>
           val nextOperation = q.headOption
@@ -130,7 +132,7 @@ object Operations {
     }
 
     for {
-//      _    <- ctx.logger.debug("NEXT_OPERATION: "+nextOps.toString)
+      _    <- ctx.logger.debug("NEXT_OPERATION: "+nextOps.toString)
       _    <- ctx.state.update{s=>s.copy( pendingQueue = newPending )}
       reqs <-  nextOps.traverse { op =>
         launchOperation(op).retryingOnFailures(
@@ -145,22 +147,16 @@ object Operations {
     } yield ()
   }
 
-
-
   def onlyUpload(operations:List[Operation]): List[Operation] = operations.filter {
     case _:Upload => true
     case _ => false
   }
-//  def onlyUploadCompleted(operations:List[Operation]): List[Operation] = operations.filter {
-//    case _:UploadCompleted => true
-//    case _ => false
-//  }
 // _____________________________________________________________________________________________________________________
   def onlyDownload(operations:List[Operation]): List[Operation] = operations.filter {
     case _:Download => true
     case _ => false
   }
-  def onlyDownloadCompleted(operations:List[CompletedOperation]): List[Operation] = operations.filter {
+  def onlyDownloadCompleted(operations:List[CompletedOperation]) = operations.filter {
     case _:DownloadCompleted => true
     case _ => false
   }
@@ -211,10 +207,9 @@ object Operations {
       }
     }
   }
+
   def getAVGServiceTime(operations:List[CompletedOperation]): Map[String, Double] =
     Operations.getAVGServiceTimeNodeIdXCOps(operations.groupBy(_.nodeId))
-
-
 
   def getAVGWaitingTimeNodeIdXCOps(xs:Map[String,List[CompletedOperation]]): Map[String, Double] = {
     xs.map{
@@ -229,6 +224,7 @@ object Operations {
     }
 
   }
+
   def getAVGWaitingTime(operations:List[CompletedOperation]): Map[String, Double] = {
     Operations.getAVGWaitingTimeNodeIdXCOps(operations.groupBy(_.nodeId))
   }
@@ -527,8 +523,6 @@ object Operations {
                           completedOperations: List[CompletedOperation],
                          queue:Map[String,List[Operation]] = Map.empty[String,List[Operation]],technique:String = "ACTIVE") ={
     val objectIdXNodes = Operations.onlyUpload(queue.values.flatten.toList).asInstanceOf[List[Upload]].groupBy(_.objectId)
-//      Operations.onlyUpload(operations).asInstanceOf[List[Upload]].groupBy(_.objectId)
-
     completedOperations.groupBy(_.objectId).map{
         case (oId,cOps) =>
           val pendings = objectIdXNodes.getOrElse(oId,Nil)
@@ -543,6 +537,7 @@ object Operations {
   def onlyUploadCompleted(completedOperations:List[CompletedOperation])=  {
     completedOperations.filter{
       case _:UploadCompleted =>  true
+      case _ => false
     }
   }
 

@@ -1,7 +1,6 @@
 package mx.cinvestav.server.controllers
 
 import mx.cinvestav.Declarations.NodeContext
-import cats.data.NonEmptyList
 import cats.implicits._
 import cats.effect._
 import cats.effect.std.Semaphore
@@ -13,7 +12,7 @@ import org.http4s.circe.CirceEntityEncoder._
 import org.typelevel.ci.CIString
 import io.circe.syntax._
 import io.circe.generic.auto._
-import mx.cinvestav.commons.types.{Download, DownloadCompleted, DownloadResult, NodeQueueStats, Upload, UploadCompleted}
+import mx.cinvestav.commons.types.{Download, DownloadCompleted, DownloadResult, NodeQueueStats}
 import mx.cinvestav.operations.Operations
 import mx.cinvestav.commons.utils
 
@@ -21,9 +20,6 @@ import scala.concurrent.duration._
 import language.postfixOps
 import retry._
 import retry.implicits._
-import fs2.Stream
-import fs2.concurrent.SignallingRef
-
 import scala.concurrent.duration._
 import language.postfixOps
 
@@ -47,7 +43,7 @@ object DownloadV3 {
           o match {
             case download:Download =>
               val wt  = lastCompleted.map(_.departureTime).getOrElse(0L) - download.arrivalTime
-              val completed  = DownloadCompleted(
+              val downloadCompleted  = DownloadCompleted(
                 operationId  = download.operationId,
                 serialNumber = download.serialNumber,
                 arrivalTime  = arrivalTime,
@@ -65,12 +61,20 @@ object DownloadV3 {
                 s.copy(
                   completedQueue      =  s.completedQueue.updatedWith(nodeId) {
                     case op@Some(value) =>
-                      op.map(x => x :+ completed)
-                    case None => (completed :: Nil).some
+                      op.map(x => x :+ downloadCompleted)
+                    case None => (downloadCompleted :: Nil).some
                   },
-                  completedOperations =  s.completedOperations :+completed,
-                  pendingQueue        =  s.pendingQueue.updated(nodeId,nextOp),
-                  nodeQueue           =  s.nodeQueue.updated(nodeId,s.nodeQueue.getOrElse(nodeId,Nil).filterNot(_.operationId == operationId ))
+                  completedOperations =  s.completedOperations :+downloadCompleted,
+                  pendingQueue        =  s.pendingQueue.updatedWith(nodeId){op=>
+                    op match {
+                      case Some(value) => None
+                      case None => nextOp.some
+                    }
+                  },
+                  //                  pendingQueue        =  s.pendingQueue.updated(nodeId,nextOp),
+                  nodeQueue           =  s.nodeQueue.updated(
+                    nodeId,
+                    s.nodeQueue.getOrElse(nodeId,Nil).filterNot(_.operationId == operationId ))
                 )
               }
               for {
@@ -81,6 +85,8 @@ object DownloadV3 {
           }
         case None => NotFound()
       }
+      _ <- ctx.logger.debug(s"DOWNLOAD_COMPLETED $operationId $objectId")
+      _                <- ctx.logger.debug("_____________________________________________")
     } yield response
     case req@GET -> Root / "download" / objectId  =>
       val app = for {
@@ -104,7 +110,7 @@ object DownloadV3 {
           case Some(replicaNodes) => for {
             _            <- ctx.logger.debug(s"REPLICA_NODES $replicaNodes")
             replicaNodeX = replicaNodes.map(currentState.nodes).map(n=>n.nodeId -> n).toMap
-            operationId  = utils.generateNodeId(prefix = "op-",len = 10,autoId=true)
+            operationId  = utils.generateNodeId(prefix = "op",len = 10,autoId=true)
             selectedNode = if(replicaNodes.length == 1 ) currentState.nodes(replicaNodes.head)
 
             else Operations.downloadBalance(x = ctx.config.downloadLoadBalancer,nodexs = replicaNodeX )(
@@ -135,7 +141,6 @@ object DownloadV3 {
                 nodeQueue = s.nodeQueue.updated(selectedNodeId,q :+ download)
               )
             }
-
             result = DownloadResult(
               id = utils.generateNodeId(prefix = "download",autoId = true),
               result = NodeQueueStats(
@@ -145,7 +150,6 @@ object DownloadV3 {
                 queuePosition = q.length
               )
             )
-
             response <- Ok(result.asJson)
 
           } yield response
@@ -157,6 +161,7 @@ object DownloadV3 {
         _      <- IO.sleep(extra milliseconds)
         //
         _ <- s.release
+        _ <- ctx.logger.debug("_____________________________________________")
       } yield response
 
       app.onError{ e=>

@@ -1,15 +1,11 @@
 package mx.cinvestav
 import cats.Order
-import cats.data.NonEmptyList
-import cats.effect.std.Semaphore
-import cats.effect.{FiberIO, IO, Ref}
-import mx.cinvestav.commons.status.Status
+import cats.effect.{IO, Ref}
 import mx.cinvestav.config.DefaultConfig
 import mx.cinvestav.commons.types.{CompletedOperation, Download, NodeX, Operation, PendingReplication, Upload, UploadHeaders,DownloadCompleted,UploadCompleted}
 import mx.cinvestav.commons.events.{AddedNode, Del, Downloaded, EventX, Evicted, Get, GetCompleted, Missed, ObjectHashing, Push, Put, PutCompleted, RemovedNode, Replicated, UpdatedNodePort, Uploaded, Pull => PullEvent, TransferredTemperature => SetDownloads}
 import mx.cinvestav.events.Events.{GetInProgress, HotObject, MeasuredServiceTime, MonitoringStats, UpdatedNetworkCfg}
 import org.http4s.Headers
-import org.http4s.blaze.client.BlazeClientBuilder
 import org.http4s.client.Client
 import org.typelevel.ci.CIString
 //

@@ -2,7 +2,6 @@ package mx.cinvestav.server.controllers
 
 import cats.implicits._
 import cats.effect._
-import mx.cinvestav.commons.events.{EventXOps, Get, Put}
 import mx.cinvestav.operations.Operations
 import org.typelevel.ci.CIString
 //
@@ -24,31 +23,23 @@ object StatsController {
   def apply()(implicit ctx:NodeContext): HttpRoutes[IO] = {
 
     HttpRoutes.of[IO]{
+      case req@GET -> Root / "stats" / "operations" => for {
+        response <- Ok()
+      } yield response
       case req@GET -> Root / "stats" =>
         val program = for {
         _                  <- IO.unit
         headers    = req.headers
         technique    = headers.get(CIString("Replication-Technique")).map(_.head.value).getOrElse(ctx.config.replicationTechnique)
         currentState       <- ctx.state.get
-        pendingReplicas    = currentState.pendingReplicas.filter(_._2.rf>0)
-        rawEvents          = currentState.events
-        events             = Events.orderAndFilterEventsMonotonicV2(events = rawEvents)
         nodesQueue         = currentState.nodeQueue
         operations         = currentState .operations
         completedQueues    = currentState.completedQueue
-        ars                = EventXOps.getAllNodeXs(events=events).map { node =>
-              val nodeId = node.nodeId
-              val publicPort = Events.getPublicPort(events= events,nodeId).map(_.publicPort).getOrElse(6666)
-            node.copy(
-              metadata = node.metadata ++ Map("PUBLIC_PORT"->publicPort.toString)
-            )
-        }
         ds = Operations.distributionSchema(
           operations = currentState.operations,
           completedOperations = currentState.completedOperations,
           technique = technique
         )
-        nodeIds            = Events.getNodeIds(events = events)
 
         avgServiceTime = Operations.getAVGServiceTime(operations = currentState.completedOperations)
         processedN = Operations.processNodes(
@@ -62,14 +53,18 @@ object StatsController {
           "nodeId" -> ctx.config.nodeId.asJson,
           "port"  -> ctx.config.port.asJson,
           "nodes" -> processedN.asJson,
-          "nodeIds" -> nodeIds.asJson,
           "loadBalancing" -> Json.obj(
             "download" -> currentState.downloadBalancerToken.asJson,
             "upload" -> currentState.uploadBalancerToken.asJson
           ),
           "apiVersion" -> ctx.config.apiVersion.asJson,
           "queues" -> nodesQueue.asJson,
-          "completedQueues" -> completedQueues.asJson,
+          "completedQueues" -> completedQueues.map{
+            case (nodeId,xs) =>
+              print(nodeId,xs.map(_.objectId))
+              nodeId-> xs.map(_.asJson(completedOperationEncoder))
+          }.toMap.asJson,
+//            .asJson,
           "avgServiceTime" -> avgServiceTime.asJson,
           "distributionSchema" -> ds.asJson,
           "totalAvgWaitingTimesByNode"  -> Operations.getAVGWaitingTimeNodeIdXCOps(currentState.completedQueue).asJson,
