@@ -23,6 +23,59 @@ import retry.implicits._
 
 object Operations {
 
+
+
+  def throughputByNode(completedQueue:Map[String,List[CompletedOperation]]) = {
+    completedQueue.map{
+      case (nodeId,cops) =>
+
+    }
+  }
+
+  def avgOperationsInQueue(avgInterArrivalRate:Map[String,Double],avgWaitingTime:Map[String,Double]) ={
+    avgInterArrivalRate.map{
+      case (nodeId,iar) =>
+        val maybeW = avgWaitingTime.get(nodeId)
+        maybeW match {
+          case Some(w) => nodeId -> w*iar
+          case None => nodeId -> 0.0
+        }
+    }
+  }
+
+  def serverUtilization(interArrivals:Map[String,Double], serviceTimes:Map[String,Double], parallelServers:Int = 1) ={
+    interArrivals.map{
+      case (nodeId,iat)=>
+        val maybeSt = serviceTimes.get(nodeId)
+        maybeSt match {
+          case Some(st) => nodeId -> iat /(parallelServers*st)
+          case None => nodeId -> 0.0
+        }
+    }
+  }
+  def avgInterarrivalRate(queue:Map[String,List[Operation]]) = {
+    avgInterarrival(queue=queue).map{
+      case (nodeId,avgIAT) => nodeId -> (1/avgIAT)
+    }
+
+  }
+  def avgInterarrival(queue:Map[String,List[Operation]]) = {
+    queue.map{
+      case (nodeId, ops)=>
+        if(ops.isEmpty)nodeId-> 0.0
+        else {
+          val arrivals      = ops.map(_.arrivalTime)
+          val arrivals0     = arrivals.tail
+          val arrivals1     = arrivals.init
+          val interArrivals = (arrivals0 zip arrivals1) map (x=>x._1 - x._2)
+          val meanInterArrival = interArrivals.sum.toDouble / interArrivals.length.toDouble
+          nodeId -> meanInterArrival
+        }
+
+    }
+
+  }
+
   def ballAccess(completedOperations:List[CompletedOperation]): Map[String, Int] = {
     onlyDownloadCompleted(completedOperations).asInstanceOf[List[DownloadCompleted]]
       .groupBy(_.objectId)
@@ -31,36 +84,6 @@ object Operations {
       }
   }
 
-  def download(d:Download)(implicit ctx:NodeContext) = {
-    val req = Request[IO](
-      method = Method.GET,
-      uri = Uri.unsafeFromString(s"http://${d.nodeId}:6666/api/v3/download/${d.objectId}"),
-      headers = Headers(
-        Header.Raw(CIString("Operation-Id"), d.operationId),
-        Header.Raw(CIString("Client-Id"), d.clientId),
-        Header.Raw(CIString("Object-Size"), d.objectSize.toString),
-        Header.Raw(CIString("Serial-Number"), d.serialNumber.toString),
-      )
-    )
-    for {
-      response <- ctx.client.stream(req = req).flatMap(_.body).compile.to(Array)
-      _        <- ctx.logger.debug(response.toString)
-    } yield response
-  }
-
-  def downloadv2(d:Download)(implicit ctx:NodeContext) = {
-    val req = Request[IO](
-      method = Method.GET,
-      uri = Uri.unsafeFromString(s"http://${d.nodeId}:6666/api/v3/download/${d.objectId}"),
-      headers = Headers(
-        Header.Raw(CIString("Operation-Id"), d.operationId),
-        Header.Raw(CIString("Client-Id"), d.clientId),
-        Header.Raw(CIString("Object-Size"), d.objectSize.toString),
-        Header.Raw(CIString("Serial-Number"), d.serialNumber.toString),
-      )
-    )
-    ctx.client.stream(req)
-  }
 
   def launchOperation(op:Operation)(implicit ctx:NodeContext) = {
     val x = op match {
@@ -116,7 +139,7 @@ object Operations {
         val  nodeId = node.nodeId
         val pendingOp      = pending.getOrElse(nodeId,None)
         val q       = queue.getOrElse(nodeId,Nil).sortBy(_.serialNumber)
-        println(s"QUEUE $q")
+//        println(s"QUEUE $q")
         println(s"PENDING_OP $pendingOp")
         pendingOp match {
         case Some(_) => p

@@ -23,9 +23,35 @@ object StatsController {
   def apply()(implicit ctx:NodeContext): HttpRoutes[IO] = {
 
     HttpRoutes.of[IO]{
+
       case req@GET -> Root / "stats" / "operations" => for {
-        response <- Ok()
+        currentState  <- ctx.state.get
+        x             = currentState.operations.groupBy(_.nodeId).asJson
+        response      <- Ok(x)
       } yield response
+
+      case req@GET -> Root / "stats" / "operations" / "completed" => for {
+        currentState    <- ctx.state.get
+        completedQueues = currentState.completedQueue
+        x               = completedQueues.map{
+          case (nodeId,xs) =>
+            nodeId-> xs.map(_.asJson(completedOperationEncoder))
+        }.toMap.asJson
+        response      <- Ok(x)
+      } yield response
+
+      case req@GET -> Root / "stats" / "queue" => for {
+        currentState <- ctx.state.get
+        x            = currentState.nodeQueue
+        response     <- Ok(x.asJson)
+      } yield response
+
+      case req@GET -> Root / "stats" / "queue" / "completed" => for {
+        currentState <- ctx.state.get
+        x            = currentState.completedQueue
+        response     <- Ok(x.asJson)
+      } yield response
+
       case req@GET -> Root / "stats" =>
         val program = for {
         _                  <- IO.unit
@@ -33,8 +59,6 @@ object StatsController {
         technique    = headers.get(CIString("Replication-Technique")).map(_.head.value).getOrElse(ctx.config.replicationTechnique)
         currentState       <- ctx.state.get
         nodesQueue         = currentState.nodeQueue
-        operations         = currentState .operations
-        completedQueues    = currentState.completedQueue
         ds = Operations.distributionSchema(
           operations = currentState.operations,
           completedOperations = currentState.completedOperations,
@@ -49,6 +73,11 @@ object StatsController {
           operations = currentState.operations
         ).toMap
 
+        iats = Operations.avgInterarrival(queue = nodesQueue)
+        iarts = Operations.avgInterarrivalRate(queue = nodesQueue)
+        sts  = Operations.getAVGServiceTimeNodeIdXCOps(currentState.completedQueue)
+        wts  = Operations.getAVGWaitingTimeByNode(completedOperations = currentState.completedQueue,queue = currentState.nodeQueue)
+        ls   = Operations.avgOperationsInQueue(avgInterArrivalRate = iarts,avgWaitingTime = wts)
         stats              = Map(
           "nodeId" -> ctx.config.nodeId.asJson,
           "port"  -> ctx.config.port.asJson,
@@ -58,22 +87,18 @@ object StatsController {
             "upload" -> currentState.uploadBalancerToken.asJson
           ),
           "apiVersion" -> ctx.config.apiVersion.asJson,
-          "queues" -> nodesQueue.asJson,
-          "completedQueues" -> completedQueues.map{
-            case (nodeId,xs) =>
-              print(nodeId,xs.map(_.objectId))
-              nodeId-> xs.map(_.asJson(completedOperationEncoder))
-          }.toMap.asJson,
-//            .asJson,
           "avgServiceTime" -> avgServiceTime.asJson,
           "distributionSchema" -> ds.asJson,
           "totalAvgWaitingTimesByNode"  -> Operations.getAVGWaitingTimeNodeIdXCOps(currentState.completedQueue).asJson,
-          "avgServiceTimesByNode"  -> Operations.getAVGServiceTimeNodeIdXCOps(currentState.completedQueue).asJson,
-          "avgWaitingTimesByNode"  -> Operations.getAVGWaitingTimeByNode(completedOperations = currentState.completedQueue,queue = currentState.nodeQueue).asJson,
+          "avgServiceTimesByNode"  -> sts.asJson,
+          "avgWaitingTimesByNode"  -> wts.asJson,
           "accessByBall" -> Operations.ballAccess(completedOperations = currentState.completedOperations).asJson,
           "acessByNode" -> Operations.ballAccessByNodes(completedOperations = currentState.completedQueue).asJson,
-          "operationsByNode" -> currentState.operations.groupBy(_.nodeId).asJson
-        )
+          "avgInterarrival" -> iats.asJson,
+          "avgInterarrivalRate" -> iarts.asJson,
+          "serverUtilization" -> Operations.serverUtilization(interArrivals = iats,serviceTimes = sts ,parallelServers = processedN.size).asJson,
+          "avgOperationsInQueue" -> ls.asJson
+          )
         response <- Ok(stats)
       } yield response
 
