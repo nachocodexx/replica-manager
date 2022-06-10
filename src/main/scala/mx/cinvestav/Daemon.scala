@@ -33,7 +33,7 @@ import retry.implicits._
 object Daemon {
 
   def apply(period:FiniteDuration = 1 second )(implicit ctx:NodeContext)= {
-    Stream.awakeEvery[IO]( period = period).evalMap{ _ =>
+    val s0 = Stream.awakeEvery[IO]( period = period).evalMap{ _ =>
       for {
         currentState <- ctx.state.get
         _ <- nextOperation(
@@ -45,5 +45,18 @@ object Daemon {
       } yield ()
     }
 
+    val s1 = Stream.awakeEvery[IO](period = period).evalMap{ _ =>
+      for {
+        currentState <- ctx.state.get
+        wts      = Operations.getAVGWaitingTimeByNode(completedOperations = currentState.completedQueue,queue = currentState.nodeQueue)
+        wtss     = wts.map(_._2)
+        globalWT = wtss.sum / wtss.size.toDouble
+        qSNodes  = wts.filter(_._2 > globalWT).keys
+        _ <- ctx.logger.debug(s"GLOBAL_WT $globalWT")
+        _ <- ctx.logger.debug(s"QSNodes $qSNodes")
+//        fs =
+      } yield()
+    }
+    s0 concurrently s1
   }
 }

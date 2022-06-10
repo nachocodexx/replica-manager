@@ -113,6 +113,7 @@ object DownloadV3 {
             operationId  = utils.generateNodeId(prefix = "op",len = 10,autoId=true)
             selectedNode = if(replicaNodes.length == 1 ) currentState.nodes(replicaNodes.head)
 
+
             else Operations.downloadBalance(x = ctx.config.downloadLoadBalancer,nodexs = replicaNodeX )(
               objectId  = objectId,
               operations = currentState.operations,
@@ -121,12 +122,15 @@ object DownloadV3 {
               objectSize = objectSize
             )
             selectedNodeId = selectedNode.nodeId
+            completedOpsBySelectedNode = currentState.completedQueue.getOrElse(selectedNodeId,Nil)
             _              <- ctx.logger.debug(s"SELECTED_NODE $selectedNodeId")
             q              = queue.getOrElse(selectedNodeId,Nil)
 
             download       = Download(
               operationId   = operationId,
-              serialNumber  = q.length,
+
+              serialNumber  = q.length + completedOpsBySelectedNode.length, // Me faltaba esto
+
               arrivalTime   = arrivalTime,
               objectId      = objectId,
               objectSize    = objectSize,

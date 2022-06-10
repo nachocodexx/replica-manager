@@ -97,7 +97,8 @@ object StatsController {
           "avgInterarrival" -> iats.asJson,
           "avgInterarrivalRate" -> iarts.asJson,
           "serverUtilization" -> Operations.serverUtilization(interArrivals = iats,serviceTimes = sts ,parallelServers = processedN.size).asJson,
-          "avgOperationsInQueue" -> ls.asJson
+          "avgOperationsInQueue" -> ls.asJson,
+          "ballAccessByNode"-> Operations.ballAcessByNode(nodeIds  = processedN.keys.toList,completedOperations = currentState.completedQueue).asJson
           )
         response <- Ok(stats)
       } yield response

@@ -25,6 +25,18 @@ object Operations {
 
 
 
+  def ballAcessByNode(nodeIds:List[String],completedOperations:Map[String,List[CompletedOperation]]) = {
+    nodeIds.map{ nId=>
+      val cOps = completedOperations.getOrElse(nId,Nil)
+      val ds   = onlyDownloadCompleted(operations = cOps)
+      val groupedDs = ds.groupBy(_.objectId).map{
+        case (oId,ops) => oId->ops.length
+      }
+      nId -> groupedDs
+    }.toMap
+  }
+
+
   def throughputByNode(completedQueue:Map[String,List[CompletedOperation]]) = {
     completedQueue.map{
       case (nodeId,cops) =>
@@ -140,7 +152,7 @@ object Operations {
         val pendingOp      = pending.getOrElse(nodeId,None)
         val q       = queue.getOrElse(nodeId,Nil).sortBy(_.serialNumber)
 //        println(s"QUEUE $q")
-        println(s"PENDING_OP $pendingOp")
+//        println(s"PENDING_OP $pendingOp")
         pendingOp match {
         case Some(_) => p
         case None =>
@@ -155,7 +167,7 @@ object Operations {
     }
 
     for {
-      _    <- ctx.logger.debug("NEXT_OPERATION: "+nextOps.toString)
+//      _    <- ctx.logger.debug("NEXT_OPERATION: "+nextOps.toString)
       _    <- ctx.state.update{s=>s.copy( pendingQueue = newPending )}
       reqs <-  nextOps.traverse { op =>
         launchOperation(op).retryingOnFailures(
@@ -506,9 +518,11 @@ object Operations {
           operations     <- what.traverse{ w=>
             val opId     = utils.generateNodeId(prefix = "op",autoId = true,len = 15)
             for {
-              arrivalTime  <- IO.monotonic.map(_.toNanos)
-              currentState <- ctx.state.get
-              queue        = currentState.nodeQueue
+              arrivalTime      <- IO.monotonic.map(_.toNanos)
+              currentState     <- ctx.state.get
+              queue            = currentState.nodeQueue
+
+
               objectSize   = w.metadata.get("OBJECT_SIZE").flatMap(_.toLongOption).getOrElse(0L)
               up           = Upload(
                 operationId = "OPERATION_ID",
