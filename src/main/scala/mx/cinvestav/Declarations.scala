@@ -2,10 +2,10 @@ package mx.cinvestav
 import cats.Order
 import cats.effect.{IO, Ref}
 import mx.cinvestav.config.DefaultConfig
-import mx.cinvestav.commons.types.{CompletedOperation, Download, NodeX, Operation, PendingReplication, Upload, UploadHeaders,DownloadCompleted,UploadCompleted}
+import mx.cinvestav.commons.types.{CompletedOperation, Download, DownloadCompleted, NodeX, Operation, PendingReplication, Upload, UploadCompleted, UploadHeaders}
 import mx.cinvestav.commons.events.{AddedNode, Del, Downloaded, EventX, Evicted, Get, GetCompleted, Missed, ObjectHashing, Push, Put, PutCompleted, RemovedNode, Replicated, UpdatedNodePort, Uploaded, Pull => PullEvent, TransferredTemperature => SetDownloads}
 import mx.cinvestav.events.Events.{GetInProgress, HotObject, MeasuredServiceTime, MonitoringStats, UpdatedNetworkCfg}
-import org.http4s.Headers
+import org.http4s.{Header, Headers, Method, Request, Uri}
 import org.http4s.client.Client
 import org.typelevel.ci.CIString
 //
@@ -124,6 +124,22 @@ object Declarations {
                                )
 
 
+  case class ClientX(id:String,port:Int,metadata:Map[String,String] = Map.empty[String,String]) {
+    def publish(objectId:String,objectSize:Long)(implicit ctx:NodeContext) = {
+
+      val req = Request[IO](
+
+        method  = Method.POST,
+        uri     = Uri.unsafeFromString(s"http://$id:$port/api/v2/publish"),
+        headers = Headers(
+          Header.Raw(CIString("Object-Id"),objectId),
+          Header.Raw(CIString("Object-Size"),objectSize.toString)
+        )
+
+      )
+      ctx.client.status(req = req)
+    }
+  }
 
   case class NodeState(
                         downloadBalancerToken:String="ROUND_ROBIN",
@@ -135,7 +151,6 @@ object Declarations {
                         replicationFactor:Int = 0,
                         availableResources:Int = 5,
                         replicationTechnique:String = "ACTIVE",
-
                         pendingQueue:Map[String,Option[Operation]] = Map.empty[String,Option[Operation]],
                         nodeQueue:Map[String,List[Operation] ] = Map.empty[String,List[Operation]],
                         completedQueue:Map[String,List[CompletedOperation]] = Map.empty[String,List[CompletedOperation]],
@@ -144,6 +159,7 @@ object Declarations {
                         lastSerialNumber:Int =0,
                         nodes:Map[String,NodeX] = Map.empty[String,NodeX],
                         readyToDownload:Map[String,List[String]] = Map.empty[String,List[String]],
+                        clients:List[ClientX] = Nil
                         )
   case class NodeContext(
                             config: DefaultConfig,

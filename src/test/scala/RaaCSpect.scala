@@ -207,9 +207,13 @@ class RaaCSpect extends munit .CatsEffectSuite {
   }
 
   test("L"){
-    val x = Map("a"->List("b"))
-    val y = x |+| Map("a"-> List("c"))
-    println(y)
+    val x = Map("f0"->Map("sn-0"->2,"sn-1"->1))
+    val y = Map("f0"-> Map("sn-0"->0,"sn-2"->0),"f1"-> Map("sn-0"->0,"sn1"->0) )
+    val z = x |+| y
+    println(z)
+//    val x = Map("a"->List("b"))
+//    val y = x |+| Map("a"-> List("c"))
+//    println(y)
   }
 
 }

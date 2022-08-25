@@ -125,5 +125,6 @@ case class DefaultConfig(
                           nextOperationDelayMs:Long=1000,
                           maxRetries:Int = 10,
                           extraServiceTimeMs:Long = 1000,
-                          exponentialBackoffMs:Long = 300
+                          exponentialBackoffMs:Long = 300,
+                          replicationDaemon:Boolean
                         )

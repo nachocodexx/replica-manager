@@ -12,6 +12,8 @@ import org.typelevel.ci.CIString
 import scala.util.Random
 import scala.concurrent.duration._
 import language.postfixOps
+import io.circe.generic.auto._
+import io.circe.syntax._
 //
 import mx.cinvestav.Declarations.NodeContext
 import mx.cinvestav.commons.types.{Download, DownloadCompleted, How, NodeUFs, NodeX, Operation, ReplicationProcess, ReplicationSchema, Upload, UploadCompleted, UploadRequest,CompletedOperation}
@@ -22,9 +24,6 @@ import retry._
 import retry.implicits._
 
 object Operations {
-
-
-
   def ballAcessByNode(nodeIds:List[String],completedOperations:Map[String,List[CompletedOperation]]) = {
     nodeIds.map{ nId=>
       val cOps = completedOperations.getOrElse(nId,Nil)
@@ -35,15 +34,12 @@ object Operations {
       nId -> groupedDs
     }.toMap
   }
-
-
   def throughputByNode(completedQueue:Map[String,List[CompletedOperation]]) = {
     completedQueue.map{
       case (nodeId,cops) =>
 
     }
   }
-
   def avgOperationsInQueue(avgInterArrivalRate:Map[String,Double],avgWaitingTime:Map[String,Double]) ={
     avgInterArrivalRate.map{
       case (nodeId,iar) =>
@@ -54,7 +50,6 @@ object Operations {
         }
     }
   }
-
   def serverUtilization(interArrivals:Map[String,Double], serviceTimes:Map[String,Double], parallelServers:Int = 1) ={
     interArrivals.map{
       case (nodeId,iat)=>
@@ -76,7 +71,7 @@ object Operations {
       case (nodeId, ops)=>
         if(ops.isEmpty)nodeId-> 0.0
         else {
-          val arrivals      = ops.map(_.arrivalTime)
+          val arrivals      = ops.sortBy(_.arrivalTime).map(_.arrivalTime)
           val arrivals0     = arrivals.tail
           val arrivals1     = arrivals.init
           val interArrivals = (arrivals0 zip arrivals1) map (x=>x._1 - x._2)
@@ -87,7 +82,6 @@ object Operations {
     }
 
   }
-
   def ballAccess(completedOperations:List[CompletedOperation]): Map[String, Int] = {
     onlyDownloadCompleted(completedOperations).asInstanceOf[List[DownloadCompleted]]
       .groupBy(_.objectId)
@@ -95,15 +89,13 @@ object Operations {
         case (objectId, ops) => objectId -> ops.length
       }
   }
-
-
   def launchOperation(op:Operation)(implicit ctx:NodeContext) = {
     val x = op match {
       case d: Download =>
         val storageNodeURL = s"http://${d.nodeId}:6666/api/v3/download/${d.objectId}"
         val req = Request[IO](
           method = Method.POST,
-          uri = Uri.unsafeFromString(s"http://${d.clientId}:9001/api/v2/pull"),
+          uri = Uri.unsafeFromString(s"http://${d.clientId}:9000/api/v2/pull"),
           headers = Headers(
             Header.Raw(CIString("Object-Id"), d.objectId),
             Header.Raw(CIString("Object-Size"), d.objectSize.toString),
@@ -116,11 +108,11 @@ object Operations {
           response <- ctx.client.stream(req = req).compile.lastOrError.handleErrorWith{ e=>
             val x = ctx.logger.error(e.getMessage)  *> InternalServerError()
             x
-          }
-          _        <- ctx.logger.debug("NODE_UPLOAD_STATUS "+response.toString)
-        } yield response
+          }.start
+//        } yield response
+        } yield ()
 
-      case u: Upload =>
+    case u: Upload =>
         val req = Request[IO](
           method = Method.POST,
           uri = Uri.unsafeFromString(s"http://${u.nodeId}:6666/api/v3/upload"),
@@ -138,50 +130,148 @@ object Operations {
            val x = ctx.logger.error(e.getMessage)  *> InternalServerError()
             x
           }
-          _        <- ctx.logger.debug("NODE_UPLOAD_STATUS "+response.toString)
-        } yield response
+//          _        <- ctx.logger.debug("NODE_UPLOAD_STATUS "+response.toString)
+        } yield ()
 //      case _ => NotFound().pure[IO]
     }
     x
   }
 
-  def nextOperation(nodexs:List[NodeX],queue:Map[String,List[Operation]],pending:Map[String,Option[Operation]])(implicit ctx:NodeContext) ={
-    val (newPending, nextOps)  = nodexs.foldLeft( (pending,List.empty[ Operation ]) ){
-      case ( p,node ) =>
-        val  nodeId = node.nodeId
-        val pendingOp      = pending.getOrElse(nodeId,None)
-        val q       = queue.getOrElse(nodeId,Nil).sortBy(_.serialNumber)
-//        println(s"QUEUE $q")
-//        println(s"PENDING_OP $pendingOp")
-        pendingOp match {
-        case Some(_) => p
-        case None =>
-          val nextOperation = q.headOption
-//          println(nextOperation)
-          nextOperation match {
-            case Some(value) =>
-              (p._1.updated(nodeId,nextOperation), p._2:+ value)
-            case None => (p._1.updated(nodeId,nextOperation),p._2 )
-          }
-      }
-    }
 
+
+
+  def nodeNextOperation(nodeId:String)(implicit ctx:NodeContext) = {
+    val policy = RetryPolicies.limitRetries[IO](maxRetries = ctx.config.maxRetries) join RetryPolicies.exponentialBackoff(ctx.config.exponentialBackoffMs milliseconds)
+    val fx     = (op:Operation) => launchOperation(op)
+//      .retryingOnFailures(
+//      wasSuccessful = (res:Response[IO]) =>{
+//        val headers = res.headers
+//        val status  = res.status
+//        val statusCode = status.code
+//        val errorCode = headers.get(CIString("Error-Code")).flatMap(_.head.value.toIntOption).getOrElse(-1)
+//        if(errorCode ==0) true.pure[IO] else (statusCode == 204 || statusCode == 200).pure[IO]
+//      },
+//      policy        = policy,
+//      onFailure     = (response:Response[IO],rd:RetryDetails) =>{
+//        val headers      = response.headers
+//        val status       = response.status
+//        val statusCode   = status.code
+//        val errorCode    = headers.get(CIString("Error-Code")).flatMap(_.head.value.toIntOption).getOrElse(-1)
+//        val errorMessage = headers.get(CIString("Error-Message")).map(_.head.value).getOrElse("ERROR_MESSAGE")
+//        ctx.logger.error(s"RETRY_${op.kind} ${op.operationId} $statusCode $errorMessage $errorCode ${rd.retriesSoFar}")
+//      }
+//    ).void
     for {
-//      _    <- ctx.logger.debug("NEXT_OPERATION: "+nextOps.toString)
-      _    <- ctx.state.update{s=>s.copy( pendingQueue = newPending )}
-      reqs <-  nextOps.traverse { op =>
-        launchOperation(op).retryingOnFailures(
-                  wasSuccessful = (res:Response[IO]) => (res.status.code == 204) .pure[IO],
-                  policy = RetryPolicies.limitRetries[IO](
-                    maxRetries = ctx.config.maxRetries
-                  ) join RetryPolicies.exponentialBackoff(ctx.config.exponentialBackoffMs milliseconds),
-                  onFailure = (response:Response[IO],rd:RetryDetails) =>
-                    ctx.logger.error(s"RETRY ${op.operationId}")
-                )
-      }
+      currentState <- ctx.state.get
+      queue        = currentState.nodeQueue
+//      nodeIds      = currentState.nodes.values.toList.map(_.nodeId)
+      pendings     = currentState.pendingQueue
+      maybePending = pendings.getOrElse(nodeId,None)
+      q            = queue.getOrElse(nodeId,List.empty[Operation]).sortBy(_.arrivalTime)
+      nextOp       = q.headOption
+       _           <- maybePending match {
+         case Some(value) => IO.unit
+         case None =>
+           nextOp match {
+             case Some(op) =>  for {
+               _ <- ctx.state.update{ s=>
+                 val newPending = s.pendingQueue.updated(nodeId,nextOp)
+                 s.copy( pendingQueue =  newPending  )
+               }
+               _ <- fx(op)
+             } yield ()
+             case None => IO.unit
+           }
+       }
+    } yield ()
+  }
+  def nextOperationV2()(implicit ctx:NodeContext) = {
+    for {
+      currentState <- ctx.state.get
+      nodeIds      = currentState.nodes.values.toList.map(_.nodeId)
+      _            <- nodeIds.traverse{ nodeId => nodeNextOperation(nodeId) }
     } yield ()
   }
 
+  def _nextOperation(operationId:String,nodeId:String)(implicit ctx:NodeContext) = {
+
+    val policy = RetryPolicies.limitRetries[IO](maxRetries = ctx.config.maxRetries) join RetryPolicies.exponentialBackoff(ctx.config.exponentialBackoffMs milliseconds)
+    val fx     = (op:Operation) => launchOperation(op)
+//      .retryingOnFailures(
+//        wasSuccessful = (res:Response[IO]) => (res.status.code == 204 || res.status.code == 200) .pure[IO],
+//        policy        = policy,
+//        onFailure     = (response:Response[IO],rd:RetryDetails) =>
+//          ctx.logger.error(s"RETRY ${op.operationId} $response")
+//      ).start.void
+    for {
+      currentState <- ctx.state.get
+      queue        = currentState.nodeQueue
+      pendings     = currentState.pendingQueue
+//    ____________________________________________________________________
+      nodeQueue    = queue.getOrElse(nodeId,Nil).sortBy(_.arrivalTime)
+      nextOp       = nodeQueue.headOption
+//    ______________________________________________________________________
+      pending      = pendings.getOrElse(nodeId,None)
+      _            <- pending match {
+        case Some(op) =>
+          if(op.operationId== operationId) fx(op) else ctx.logger.error("EARLY_COMPLETED_OPERATION")
+        case None =>
+          nextOp match {
+            case Some(op) => fx(op)
+            case None => IO.unit
+          }
+      }
+
+    } yield ()
+  }
+
+//  def nextOperation(nodexs:List[NodeX],queue:Map[String,List[Operation]],pending:Map[String,Option[Operation]])(implicit ctx:NodeContext) ={
+//    val (newPending, nextOps)  = nodexs.foldLeft( (pending,List.empty[ Operation ]) ){
+//      case ( p,node ) =>
+//        val nodeId    = node.nodeId
+//        val pendingOp = p._1.getOrElse(nodeId,None)
+////        val pendingOp = pending.getOrElse(nodeId,None)
+//        val q         = queue.getOrElse(nodeId,Nil).sortBy(_.arrivalTime)
+//        pendingOp match {
+//        case Some(_) => p
+//        case None =>
+//          val nextOperation = q.headOption
+////          println(nextOperation)
+//          nextOperation match {
+//            case Some(value) =>
+//              (p._1.updated(nodeId,nextOperation), p._2:+ value)
+//            case None => (p._1.updated(nodeId,nextOperation),p._2 )
+//          }
+//      }
+//    }
+//    val policy = RetryPolicies.limitRetries[IO](maxRetries = ctx.config.maxRetries) join RetryPolicies.exponentialBackoff(ctx.config.exponentialBackoffMs milliseconds)
+//
+//    for {
+//      _        <- ctx.state.update{s=>s.copy( pendingQueue = newPending )}
+//      currentState <- ctx.state.get
+//      _nextOps = nextOps.filterNot(x=>currentState.completedOperations.map(_.operationId).contains(x.operationId) )
+//      reqs <-  _nextOps.traverse { op =>
+//        for {
+//          startTime <- IO.monotonic.map(_.toNanos)
+//          _ <-
+//            launchOperation(op).retryingOnFailures(
+//              wasSuccessful = (res:Response[IO]) => (res.status.code == 204 || res.status.code == 200) .pure[IO],
+//              policy        = policy,
+//              onFailure     = (response:Response[IO],rd:RetryDetails) =>
+//                ctx.logger.error(s"RETRY ${op.operationId} $response")
+//            )
+//          serviceTime <- IO.monotonic.map(_.toNanos - startTime)
+//          (opStr,objectId,objectSize) = op match {
+//            case d:Download => ("DOWNLOAD_QUEUE",d.objectId,d.objectSize)
+//            case u:Upload => ("UPLOAD_QUEUE",u.objectId,u.objectSize)
+//            case _ => ("","OBJECT_ID",0L)
+//          }
+////          objectId =
+//          _ <- ctx.logger.info(s"$opStr ${op.operationId} $objectId $objectSize ${op.nodeId} $serviceTime 0 0")
+//        } yield ()
+//      }
+//    } yield ()
+//  }
   def onlyUpload(operations:List[Operation]): List[Operation] = operations.filter {
     case _:Upload => true
     case _ => false
@@ -196,7 +286,6 @@ object Operations {
     case _ => false
   }
 // _____________________________________________________________________________________________________________________
-
   def getAVGWaitingTimeByNode(completedOperations:Map[String,List[CompletedOperation]],queue:Map[String,List[Operation]]): Map[String, Double] ={
     val sts = getAVGServiceTime(operations = completedOperations.values.flatten.toList)
     queue.map{
@@ -228,8 +317,6 @@ object Operations {
         (nodeId -> (if(cOps.isEmpty) 0.0 else cOps.map(_.waitingTime).sum.toDouble/cOps.length.toDouble) )
     }
   }
-
-
   def getAVGServiceTimeNodeIdXCOps(xs:Map[String,List[CompletedOperation]]) = {
     xs.map{
       case (nodeId,xs)=> nodeId ->  {
@@ -242,10 +329,8 @@ object Operations {
       }
     }
   }
-
   def getAVGServiceTime(operations:List[CompletedOperation]): Map[String, Double] =
     Operations.getAVGServiceTimeNodeIdXCOps(operations.groupBy(_.nodeId))
-
   def getAVGWaitingTimeNodeIdXCOps(xs:Map[String,List[CompletedOperation]]): Map[String, Double] = {
     xs.map{
       case (nodeId,xs)=> nodeId ->  {
@@ -259,12 +344,9 @@ object Operations {
     }
 
   }
-
   def getAVGWaitingTime(operations:List[CompletedOperation]): Map[String, Double] = {
     Operations.getAVGWaitingTimeNodeIdXCOps(operations.groupBy(_.nodeId))
   }
-
-
   def processNodes(nodexs:Map[String,NodeX],
                    completedOperations:List[CompletedOperation],
                    queue:Map[String,List[Operation]],
@@ -344,68 +426,86 @@ object Operations {
         .map(n=> Operations.updateNodeX(n,objectSize = objectSize,downloadDiv = 0L))
     }
   }
-
-  def ballAccessByNodes(completedOperations:Map[String,List[CompletedOperation]]): Map[String, Map[String, Int]] = {
-    val COPS       = completedOperations.values.toList.flatten
-    val cDownloads = onlyDownloadCompleted(COPS).asInstanceOf[List[DownloadCompleted]]
-    val nodesByUps = onlyUploadCompleted(COPS).asInstanceOf[List[UploadCompleted]].groupBy(_.objectId)
-      .map{
-        case (objectId, ops) => objectId -> ops.map(_.nodeId).distinct
-      }
-    cDownloads.groupBy(_.objectId).map{
+  def ballAccessByNodes(completedOperations:Map[String,List[CompletedOperation]],operations:List[Operation]=Nil): Map[String, Map[String, Int]] = {
+    val COPS             = completedOperations.values.toList.flatten
+//
+//    val cDownloads  = onlyDownloadCompleted(COPS).asInstanceOf[List[DownloadCompleted]]
+    val _cDownloads = onlyDownload(operations = operations).asInstanceOf[List[Download]]
+//
+//    val cUploads  =  onlyUploadCompleted(COPS).asInstanceOf[List[UploadCompleted]]
+    val _cUploads = onlyUpload(operations = operations).asInstanceOf[List[Upload]]
+//
+//    val nodesByUps       =cUploads.groupBy(_.objectId).map{
+//        case (objectId, ops) => objectId -> ops.map(_.nodeId).distinct
+//    }
+    val _nodesByUps       =_cUploads.groupBy(_.objectId).map{
+      case (objectId, ops) => objectId -> ops.map(_.nodeId).distinct
+    }
+    //
+//    val defaultAccessMap = nodesByUps.map{
+//      case (objectId,xs)=> objectId -> xs.map(x=>x->0).toMap
+//    }
+    val _defaultAccessMap = _nodesByUps.map{
+      case (objectId,xs)=> objectId -> xs.map(x=>x->0).toMap
+    }
+//
+    val access = _cDownloads.groupBy(_.objectId).map{
       case (objectId,cops) =>
         objectId -> cops.groupBy(_.nodeId)
     }.map{
       case (objectId,mcops) =>
-        val replicaNodes = nodesByUps.getOrElse(objectId,Nil).map(n=>n->0).toMap
+        val replicaNodes = _nodesByUps.getOrElse( objectId, Nil ).map(n=>n->0).toMap
+
         val y = mcops.map{
           case (nodeId,ops) => nodeId-> ops.length
         } |+| replicaNodes
-//        val default =
         objectId -> y
-    }
+    } |+| _defaultAccessMap
+    access
   }
-
-  def downloadBalance(x:String,nodexs:Map[String,NodeX])(
+  def downloadBalance(x:String, replicaNodeX:Map[String,NodeX])(
                      objectId:String,
-    operations:List[Operation] = Nil,
-    queue:Map[String,List[Operation]] = Map.empty[String,List[Operation]],
-    completedQueue:Map[String,List[CompletedOperation]] = Map.empty[String,List[CompletedOperation]],
-    objectSize:Long,
+                     operations:List[Operation] = Nil,
+                     queue:Map[String,List[Operation]] = Map.empty[String,List[Operation]],
+                     completedQueue:Map[String,List[CompletedOperation]] = Map.empty[String,List[CompletedOperation]],
+                     objectSize:Long,
   ) = {
     x match {
       case "LEAST_HITS"=>
-        val access          = Operations.ballAccessByNodes(completedOperations = completedQueue)
+        val access          = Operations.ballAccessByNodes(completedOperations = completedQueue,operations = operations)
         val accessByReplica = access.get(objectId)
         accessByReplica match {
-          case Some(value) => nodexs(value.minBy(_._2)._1)
-          case None => nodexs.toList(Random.nextInt(nodexs.size))._2
+          case Some(value) =>
+            val _value = value.filter(x=>replicaNodeX.contains(x._1))
+            val minNodeId = _value.minBy(_._2)._1
+            replicaNodeX(minNodeId)
+          case None => replicaNodeX.toList(Random.nextInt(replicaNodeX.size))._2
         }
 //        nodexs(accessByReplica.minBy(_._2))
       case "MIN_WAITING_TIME"  =>
-        val defaultWtXNode   = nodexs.keys.toList.map(_ -> 0.0).toMap
+        val defaultWtXNode   = replicaNodeX.keys.toList.map(_ -> 0.0).toMap
         val waitingTimeXNode =  (defaultWtXNode ++ Operations.getAVGWaitingTimeByNode(
           completedOperations = completedQueue,
           queue = queue
         )).toList.minBy(_._2)
-        Operations.updateNodeX(nodeX = nodexs(waitingTimeXNode._1),objectSize=objectSize,uploadDiv = 0L)
+        replicaNodeX(waitingTimeXNode._1)
+//        Operations.updateNodeX(nodeX = replicaNodeX(waitingTimeXNode._1),objectSize=objectSize,uploadDiv = 0L)
       case "ROUND_ROBIN" =>
         val grouped  = onlyDownload(operations).asInstanceOf[List[Download]].groupBy(_.nodeId)
         val xs       = grouped.map(x=> x._1 -> x._2.length)
         val total    = xs.values.toList.sum
-        val AR       = nodexs.size
+        val AR       = replicaNodeX.size
         val index    = total%AR
-        val orderedNodes = (nodexs.values.toList.sortBy(_.nodeId))
+        val orderedNodes = (replicaNodeX.values.toList.sortBy(_.nodeId))
         val selectedNode = orderedNodes(index)
-        Operations.updateNodeX(selectedNode,objectSize = objectSize)
-      case "SORTING_UF" =>
-        Operations.updateNodeX(nodexs.values.toList.minBy(_.ufs.memoryUF),objectSize)
+        selectedNode
+//        Operations.updateNodeX(selectedNode,objectSize = objectSize)
+//      case "SORTING_UF" =>
+//        replicaNodeX.values.toList.minBy(_.ufs.memoryUF)
+//        Operations.updateNodeX(,objectSize)
 //          .map(n=> Operations.updateNodeX(n,objectSize = objectSize))
     }
   }
-
-
-
 
 
   def updateNodeX(nodeX: NodeX,objectSize:Long, uploadDiv:Long = 1L, downloadDiv:Long = 1L )={
@@ -460,10 +560,10 @@ object Operations {
         val rf            = w.metadata.get("REPLICATION_FACTOR").flatMap(_.toIntOption).getOrElse(1)
         val objectSize    = w.metadata.get("OBJECT_SIZE").flatMap(_.toLongOption).getOrElse(0L)
         val selectedNodes = Operations.uploadBalance(lbToken, ns)(
-          operations = operations,
-          objectSize = objectSize,
-          rf = rf,
-          queue = queue,
+          operations     = operations,
+          objectSize     = objectSize,
+          rf             = rf,
+          queue          = queue,
           completedQueue = completedQueue
         )
         val y             = selectedNodes.foldLeft(ns) { case (xx, n) => xx.updated(n.nodeId, n)}
@@ -516,7 +616,7 @@ object Operations {
           where          = rp.where
           whereCompleted = where :+ nodeId
           operations     <- what.traverse{ w=>
-            val opId     = utils.generateNodeId(prefix = "op",autoId = true,len = 15)
+            val opId     = utils.generateNodeId(prefix = "op",autoId = true,len = 10)
             for {
               arrivalTime      <- IO.monotonic.map(_.toNanos)
               currentState     <- ctx.state.get
@@ -558,19 +658,22 @@ object Operations {
   def distributionSchema(
                           operations:List[Operation],
                           completedOperations: List[CompletedOperation],
-                         queue:Map[String,List[Operation]] = Map.empty[String,List[Operation]],technique:String = "ACTIVE") ={
+                         queue:Map[String,List[Operation]] = Map.empty[String,List[Operation]],
+                          technique:String = "ACTIVE") ={
     val objectIdXNodes = Operations.onlyUpload(queue.values.flatten.toList).asInstanceOf[List[Upload]].groupBy(_.objectId)
+
     completedOperations.groupBy(_.objectId).map{
-        case (oId,cOps) =>
-          val pendings = objectIdXNodes.getOrElse(oId,Nil)
+        case (objectId,cOps) =>
+          val pendings = objectIdXNodes.getOrElse(objectId,Nil)
           val partialDs = cOps.map(_.nodeId).distinct
           technique match {
               case "ACTIVE" =>
-                if(pendings.isEmpty) (oId ->partialDs) else (oId -> Nil)
-              case "PASSIVE" => oId -> partialDs
+                if(pendings.isEmpty) (objectId ->partialDs) else (objectId -> Nil)
+              case "PASSIVE" => objectId -> partialDs
           }
     }
   }
+
   def onlyUploadCompleted(completedOperations:List[CompletedOperation])=  {
     completedOperations.filter{
       case _:UploadCompleted =>  true
@@ -603,18 +706,26 @@ object Operations {
         case (objectId, value) =>
           val id     = utils.generateNodeId(prefix = "us",len = 10,autoId = true)
           val nodeq  = value.map{ x=>
+            val objectSize = x match {
+              case d:Download => d.objectSize
+              case u:Upload => u.objectSize
+              case _=> 0L
+            }
             NodeQueueStats(
               operationId =x.operationId ,
               nodeId = x.nodeId,
               avgServiceTime = avgServiceTimeByNode.getOrElse(x.nodeId,0.0),
               avgWaitingTime = avgWaitingTimeByNode.getOrElse(x.nodeId,0.0),
-              queuePosition = x.serialNumber
+              queuePosition = x.serialNumber,
+              objectSize = objectSize,
+
             )
           }.toList
           val correlationId = value.map(_.correlationId).headOption.getOrElse("CORRELATION_ID")
 
           objectId -> UploadResult(id = correlationId, results = nodeq)
       }
+
       res                  = UploadBalance(id = id, result = xxs, serviceTime = 0)
     } yield res
   }

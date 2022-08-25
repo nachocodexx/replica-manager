@@ -6,15 +6,13 @@ import cats.effect.IO
 import cats.effect.std.Semaphore
 import mx.cinvestav.commons.events.{Downloaded, Evicted, Missed, Uploaded}
 import mx.cinvestav.events.Events
-import mx.cinvestav.server.controllers.{AddNode, CompletedUploadController, DownloadControllerV2, DownloadV3, EventsControllers, EvictedController, PutController, ReplicateController, ResetController, SaveEventsController, StatsController, UpdateConfig, UpdatePublicPort, UploadControllerV2, UploadV3}
+import mx.cinvestav.server.controllers.{AddNode, CompletedUploadController, DownloadControllerV2, DownloadV3, EventsControllers, EvictedController, Handshake, PutController, ReplicateController, ResetController, SaveEventsController, StatsController, UpdateConfig, UpdatePublicPort, UploadControllerV2, UploadV3}
 import mx.cinvestav.server.middlewares.AuthMiddlewareX
 import org.http4s.server.middleware.CORS
 //
 import io.circe._
 import io.circe.generic.auto._
 import io.circe.syntax._
-//
-import mx.cinvestav.Helpers
 //
 import org.http4s.blaze.client.BlazeClientBuilder
 import org.http4s.blaze.server.BlazeServerBuilder
@@ -51,7 +49,7 @@ class HttpServer(s:Semaphore[IO])(implicit ctx:NodeContext) {
      CORS(SaveEventsController()) <+> ResetController() <+> PutController()<+> EvictedController() <+> UpdatePublicPort() <+> ReplicateController()
 
 
-  val downAndUpV3 = UploadV3(s=s) <+> DownloadV3(s=s)
+  val downAndUpV3 = UploadV3(s=s) <+> DownloadV3(s=s) <+> Handshake()
 
   def httpApp: Kleisli[IO, Request[IO], Response[IO]] =
     Router[IO](
